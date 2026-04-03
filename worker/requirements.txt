@@ -1,0 +1,39 @@
+# Audio capture and playback
+PyAudio>=0.2.14
+sounddevice>=0.4.6
+
+# ML inference
+onnxruntime-gpu>=1.17.0  # GPU acceleration
+# onnxruntime>=1.17.0  # CPU-only fallback
+torch>=2.1.0  # PyTorch for model inference
+
+# STT providers
+sherpa-onnx>=1.9.0  # Default STT
+# faster-whisper>=0.10.0  # Alternative STT (optional)
+
+# TTS providers
+kokoro>=0.3.0  # Default TTS (82M params)
+# piper-tts>=2.0.0  # Alternative TTS (optional)
+# chatterbox-tts>=1.0.0  # Quality tier (optional)
+# orpheus-tts>=0.1.0  # Emotion tier (optional)
+
+# VAD
+silero-vad>=0.4.1  # Voice activity detection
+
+# Wake word
+openwakeword>=0.5.0  # Wake word detection
+
+# Echo cancellation
+# speexdsp-rs>=0.1.0  # SpeexDSP AEC (optional, can be installed later)
+
+# Utilities
+numpy>=1.24.0
+aiohttp>=3.9.0  # Async HTTP for LLM APIs
+pyyaml>=6.0.1  # Config parsing
+structlog>=23.2.0  # Structured logging
+
+# VRAM detection
+pynvml>=11.5.0  # NVIDIA VRAM monitoring
+
+# Optional: Intel Arc OpenVINO fallback
+# openvino>=2023.3.0  # Intel GPU acceleration

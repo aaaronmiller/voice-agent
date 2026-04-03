@@ -1,0 +1,111 @@
+# Echo-Node Configuration Example
+# Copy this file to config.yaml and customize for your setup
+
+echo_node:
+  name: "Gimp"                    # Assistant name
+  version: "1.0.0"
+
+audio:
+  sample_rate: 16000              # Microphone sample rate (Hz)
+  channels: 1                     # Mono audio
+  chunk_size: 512                 # Frames per buffer
+  device: null                    # null = system default, or specify device name
+
+# Pipeline mode: "local" (modular) or "cloud" (Gemini Live)
+pipeline_mode: local
+
+wake_word:
+  provider: openwakeword          # Wake word provider
+  model: "yo_gimp"                # Model name or path to .onnx file
+  threshold: 0.5                  # Detection sensitivity (0.0-1.0)
+  cooldown_ms: 2000               # Ignore wake words for 2s after activation
+
+activation_sound:
+  enabled: true                   # Play sound on wake word detection
+  sound: beep                     # "beep" | "chime" | "silent" | path/to/custom.wav
+
+vad:
+  provider: silero                # Voice activity detection provider
+  threshold: 0.5                  # Speech detection sensitivity
+  min_speech_ms: 250              # Minimum speech duration to trigger
+  max_silence_ms: 1500            # Silence duration before endpointing
+
+stt:
+  provider: sherpa-onnx           # Speech-to-text: sherpa-onnx | faster-whisper | vibevoice-asr
+  model: "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  device: cuda                    # cuda | cpu | openvino
+  language: en
+
+tts:
+  provider: kokoro                # Text-to-speech: kokoro | chatterbox | orpheus | piper
+  model: "kokoro-v1.0"
+  voice: "af_heart"               # Voice preset
+  device: cuda
+  streaming: true                 # Enable sentence-boundary chunking
+  sample_rate: 24000
+
+llm:
+  provider: ollama                # LLM: ollama | openai-compat
+  model: "llama3.2:7b-q4_K_M"     # Model name
+  base_url: "http://localhost:11434/v1"  # Ollama default
+  api_key: ""                     # Leave blank for Ollama, required for OpenRouter/OpenAI
+  temperature: 0.7                # Response creativity
+  max_tokens: 256                 # Max response length
+  tools: []                       # MCP tool definitions (Phase 3)
+
+personality:
+  active: hacker                  # Personality: hacker | seductive | butler | drill-sergeant | stoner-philosopher | custom
+  custom_prompt: ""               # Used if active == "custom"
+
+conversation:
+  memory_turns: 15                # Sliding window of conversation history
+  persist_across_sessions: false  # No cross-session persistence (agent handles this)
+
+echo_cancellation:
+  mode: mute                      # mute | speexdsp | none
+  speexdsp:
+    filter_length: 4096
+    frame_size: 512
+
+integrations:
+  hermes:
+    enabled: false
+    url: "ws://localhost:8765"
+    channel_name: "echo-node-voice"
+  openclaw:
+    enabled: false
+    skill_dir: "~/.openclaw/skills/echo-node"
+  mcp:
+    enabled: false
+    servers: []
+
+ui:
+  mode: web                       # web | headless
+  theme: minimal                  # minimal | cyberpunk | retro-terminal | glassmorphism
+  avatar:
+    model: random                 # "random" | specific VRM filename | path to custom .vrm
+    pool:                         # Avatar rotation pool
+      - "avatar-01-casual.vrm"
+      - "avatar-02-punk.vrm"
+      - "avatar-03-corporate.vrm"
+      - "avatar-04-anime.vrm"
+      - "avatar-05-robot.vrm"
+      - "avatar-06-witch.vrm"
+      - "avatar-07-pirate.vrm"
+      - "avatar-08-cyborg.vrm"
+      - "avatar-09-elf.vrm"
+      - "avatar-10-scientist.vrm"
+      - "avatar-11-ninja.vrm"
+      - "avatar-12-steampunk.vrm"
+    idle_animations: true
+    eye_tracking: true
+  port: 3000
+
+gateway:
+  port: 3000
+  bind: "127.0.0.1"               # 127.0.0.1 (localhost) | 0.0.0.0 (LAN access)
+  worker_url: "ws://localhost:9001"
+
+worker:
+  port: 9001
+  log_level: info                 # debug | info | warn | error

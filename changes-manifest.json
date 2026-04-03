@@ -1,0 +1,195 @@
+# Changes Manifest
+**Generated**: 2026-03-29
+**Session**: Echo-Node Phase 3 US1 Complete
+**Updated**: 2026-03-29 17:20
+
+---
+
+## Summary
+
+- **Total Files Created**: 26
+- **Total Files Modified**: 5
+- **Lines Added**: ~4,200
+- **Lines Removed**: ~250
+- **US1 Completion**: 25/25 (100%)
+
+---
+
+## Files Created
+
+### Phase 3 US1: Session 2 (6 new files)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `gateway/src/sessions/session-manager.ts` | Session management (15-turn, 30s timeout) | 160 |
+| `worker/sounds/beep.wav` | Activation sound (880Hz, 150ms) | Binary |
+| `worker/sounds/chime.wav` | Activation chime (1174Hz, 200ms) | Binary |
+| `docs/setup-fedora.md` | Fedora Linux setup guide | 140 |
+| `docs/setup-macos.md` | macOS setup guide | 120 |
+| `.checkpoints/work-echo-node-phase3/work-log-2026-03-29-session2.md` | Session 2 work log | 200 |
+
+### Previous Files (from Session 1)
+
+See previous manifest for 20 files from Session 1.
+
+---
+
+## Files Modified
+
+| File | Changes | Reason |
+|------|---------|--------|
+| `gateway/src/websocket.ts` | Added SessionManager integration | Event relay + session tracking |
+| `worker/main.py` | VRAM estimation, startup chime | Resource checking, ready signal |
+| `specs/001-echo-node-core/tasks.md` | All US1 tasks marked complete | Phase 3 US1 done |
+| `changes-manifest.json` | Updated counts | Session 2 additions |
+| `.gitignore` | Added sound files | Track audio assets |
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `worker/main.py` | Worker entry point, WebSocket server | 360 |
+| `gateway/src/index.ts` | Gateway entry point, Hono server | 250 |
+| `worker/providers/base.py` | Provider ABCs (STT, TTS, VAD, WakeWord, LLM) | 120 |
+| `worker/providers/__init__.py` | Provider registry | 85 |
+| `worker/state_machine.py` | 5-state machine | 110 |
+| `worker/config.py` | Config loader + validator | 160 |
+| `worker/audio/capture.py` | Microphone capture | 180 |
+| `worker/audio/playback.py` | Speaker playback | 150 |
+| `worker/vram_calculator.py` | VRAM detection | 140 |
+| `worker/streaming/sentence_chunker.py` | Sentence chunking | 60 |
+| `worker/streaming/conversation/memory.py` | 15-turn memory | 180 |
+| `gateway/src/websocket.ts` | WebSocket hub | 190 |
+| `gateway/src/routes/health.ts` | GET /api/health | 40 |
+| `gateway/src/routes/config.ts` | GET/PUT /api/config | 80 |
+| `gateway/src/routes/status.ts` | GET /api/status | 45 |
+| `gateway/src/utils/types.ts` | TypeScript types | 100 |
+| `gateway/src/utils/config-loader.ts` | Config loader | 120 |
+| `gateway/src/utils/logger.ts` | Pino logger | 80 |
+
+### Phase 3 US1: Providers (5 files)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `worker/providers/stt/sherpa_stt.py` | Sherpa-ONNX STT | 140 |
+| `worker/providers/tts/kokoro_tts.py` | Kokoro-82M TTS | 100 |
+| `worker/providers/vad/silero_vad.py` | Silero-VAD | 90 |
+| `worker/providers/wake_word/openwakeword.py` | OpenWakeWord | 100 |
+| `worker/providers/llm/ollama_llm.py` | Ollama LLM | 130 |
+
+### Phase 3 US1: Pipeline (1 file)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `worker/pipeline.py` | Voice orchestration | 380 |
+
+### Phase 3 US1: Personalities (5 files)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `worker/personalities/hacker.yaml` | Hacker personality | 30 |
+| `worker/personalities/seductive.yaml` | Seductive personality | 30 |
+| `worker/personalities/butler.yaml` | Butler personality | 30 |
+| `worker/personalities/drill-sergeant.yaml` | Drill sergeant | 30 |
+| `worker/personalities/stoner-philosopher.yaml` | Stoner philosopher | 30 |
+
+### Documentation (4 files)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `README.md` | Project overview + quickstart | 150 |
+| `test.sh` | Quick test script | 120 |
+| `config.yaml` | Active configuration | 100 |
+| `docs/setup-wsl2.md` | WSL2 audio setup | 180 |
+
+### Work Logs (2 files)
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `.checkpoints/work-echo-node-phase3/work-log-2026-03-29.md` | Session log | 140 |
+| `.checkpoints/work-echo-node-phase3/work-log-2026-03-29-continued.md` | Continued session | 60 |
+
+---
+
+## Files Modified
+
+| File | Changes | Reason |
+|------|---------|--------|
+| `gateway/src/websocket.ts` | Removed Bun WebSocket client code | Bun limitation workaround |
+| `worker/providers/__init__.py` | Added provider imports | Enable provider factory |
+
+---
+
+## Dependencies Added
+
+### Python (worker/requirements.txt)
+- aiohttp>=3.9.0
+- numpy>=1.24.0
+- pyyaml>=6.0.1
+- sounddevice>=0.4.6 (or PyAudio)
+- sherpa-onnx>=1.9.0
+- kokoro>=0.3.0
+- silero-vad>=0.4.1
+- openwakeword>=0.5.0
+- pynvml>=11.5.0
+
+### Bun (gateway/package.json)
+- hono@^4.0.0
+- ws@^8.16.0
+- yaml@^2.3.4
+- pino@^8.17.0
+- typescript@^5.3.0
+- eslint@^8.56.0
+- prettier@^3.1.0
+
+### Bun (frontend/package.json)
+- svelte@^5.0.0
+- @sveltejs/kit@^2.0.0
+- three@^0.160.0
+- @pixiv/three-vrm@^2.0.0
+- talkinghead (GitHub)
+
+---
+
+## Configuration Changes
+
+| File | Change |
+|------|--------|
+| `config.yaml` | Created from config.example.yaml |
+| `.gitignore` | Created (Python, Node, models, IDE) |
+| `gateway/tsconfig.json` | Created |
+| `gateway/.eslintrc.json` | Created |
+| `gateway/.prettierrc.json` | Created |
+| `worker/pyproject.toml` | Created (ruff, black config) |
+| `frontend/svelte.config.js` | Created |
+| `frontend/vite.config.ts` | Created |
+
+---
+
+## Checkpoints
+
+| Checkpoint | Description |
+|------------|-------------|
+| 1 | Phase 2 Foundational Complete (18 tasks) |
+| 2 | Smoke Test Pass (config, state machine, gateway) |
+| 3 | Provider Implementations Complete (5 providers) |
+| 4 | Pipeline Orchestration Complete |
+| 5 | Personality Presets Complete (5 files) |
+
+---
+
+## Known Issues
+
+| Issue | Status | Workaround |
+|-------|--------|------------|
+| Bun WebSocket client not available | Deferred | Worker initiates connection |
+| Kokoro model not installed | Placeholder | Real model via setup.sh |
+| Silero-VAD PyTorch dependency | Fallback | Energy-based detection |
+
+---
+
+## Next Session Tasks
+
+1. T048: VRAM check integration
+2. T049: Startup ready signal
+3. T034-T037: Trigger, barge-in, mute, activation sound
+4. T041-T046: Event emission to gateway
+5. T050-T052: Setup documentation

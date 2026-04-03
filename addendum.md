@@ -3,7 +3,7 @@ make sure to include:
 Vibevoice as an addtional stt method/provider
 
 the following as an additonal in model alternative to the modular design of theret of the project (user can select this if they prefer it)
-(intergrate with our exisiting stack so tehr is a pure api way to use the program - if we can enable api access to cloud based stt and tts providers as well as third optino that would be sweet)
+(intergrate with our exisiting stack) so tehr is a pure api way to use the program - if we can enable api access to cloud based stt and tts providers as well as third optino that would be sweet)
 
 
 Conversation with Gemini

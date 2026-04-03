@@ -1,0 +1,316 @@
+# Echo-Node Configuration Example
+# Copy this file to config.yaml and customize for your setup
+
+echo_node:
+  name: "Gimp"                    # Assistant name
+  version: "1.0.0"
+
+audio:
+  sample_rate: 16000              # Microphone sample rate (Hz)
+  channels: 1                     # Mono audio
+  chunk_size: 512                 # Frames per buffer
+  device: null                    # null = system default, or specify device name
+
+# Pipeline mode: "local" (modular) or "cloud" (Gemini Live)
+pipeline_mode: local
+
+# =============================================================================
+# Cloud Mode Configuration (Gemini Live)
+# =============================================================================
+# Set pipeline_mode: cloud to use Gemini Live API for STT+LLM+TTS
+# Requires: llm.api_key with Google AI API key
+# =============================================================================
+
+# Example Cloud Mode Configuration:
+# pipeline_mode: cloud
+# llm:
+#   provider: openai-compat
+#   model: "gemini-2.0-flash-live-001"
+#   api_key: "your-google-ai-api-key"  # Get from https://aistudio.google.com/app/apikey
+#   base_url: "https://generativelanguage.googleapis.com/v1"
+# audio:
+#   sample_rate: 16000
+
+wake_word:
+  provider: openwakeword          # Wake word provider
+  model: "yo_gimp"                # Model name or path to .onnx file
+  threshold: 0.5                  # Detection sensitivity (0.0-1.0)
+  cooldown_ms: 2000               # Ignore wake words for 2s after activation
+
+activation_sound:
+  enabled: true                   # Play sound on wake word detection
+  sound: beep                     # "beep" | "chime" | "silent" | path/to/custom.wav
+
+vad:
+  provider: silero                # Voice activity detection provider
+  threshold: 0.5                  # Speech detection sensitivity
+  min_speech_ms: 250              # Minimum speech duration to trigger
+  max_silence_ms: 1500            # Silence duration before endpointing
+
+# =============================================================================
+# STT (Speech-to-Text) Providers
+# =============================================================================
+# Available providers:
+#   - sherpa-onnx      (default) - Fast, streaming, local
+#   - faster-whisper   - Higher accuracy, GPU-accelerated
+#   - vibevoice-asr    (Phase 5) - Cloud-based, multi-language
+# =============================================================================
+
+stt:
+  provider: sherpa-onnx           # Speech-to-text provider
+  model: "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  device: cuda                    # cuda | cpu | openvino
+  language: en
+
+# Alternative STT: Faster-Whisper (uncomment to use)
+# stt:
+#   provider: faster-whisper
+#   model: "Systran/faster-distil-whisper-large-v3"  # Or any HF whisper model
+#   device: cuda
+#   language: en
+#   compute_type: float16         # float16 | int8 | float32
+
+# Alternative STT: VibeVoice ASR (Phase 5 - commented)
+# stt:
+#   provider: vibevoice-asr
+#   api_key: "your-vibevoice-api-key"
+#   language: en-US
+
+# =============================================================================
+# TTS (Text-to-Speech) Providers
+# =============================================================================
+# Available providers:
+#   - kokoro         (default) - Fast, natural-sounding, local
+#   - piper          - Lightweight, many voices, local
+#   - chatterbox     (Phase 4) - Expressive, character voices
+#   - orpheus        (Phase 4) - High-fidelity, emotional range
+# =============================================================================
+
+tts:
+  provider: kokoro                # Text-to-speech provider
+  model: "kokoro-v1.0"
+  voice: "af_heart"               # Voice preset
+  device: cuda
+  streaming: true                 # Enable sentence-boundary chunking
+  sample_rate: 24000
+
+# Alternative TTS: Piper (uncomment to use)
+# tts:
+#   provider: piper
+#   model: "en_US-amy-medium"     # Piper voice model
+#   device: cuda                  # cuda | cpu
+#   sample_rate: 22050
+
+# Alternative TTS: ChatterBox (Phase 4 - commented)
+# tts:
+#   provider: chatterbox
+#   model: "chatterbox-v1"
+#   voice: "character_name"
+#   device: cuda
+
+# Alternative TTS: Orpheus (Phase 4 - commented)
+# tts:
+#   provider: orpheus
+#   model: "orpheus-3b-v0.1"
+#   voice: "narrator"
+#   device: cuda
+
+# =============================================================================
+# LLM (Large Language Model) Providers
+# =============================================================================
+# Available providers:
+#   - ollama         (default) - Local models, privacy-first
+#   - openai-compat  - OpenRouter, OpenAI, Any OpenAI-compatible API
+# =============================================================================
+
+llm:
+  provider: ollama                # LLM provider
+  model: "llama3.2:7b-q4_K_M"     # Model name
+  base_url: "http://localhost:11434/v1"  # Ollama default
+  api_key: ""                     # Leave blank for Ollama, required for OpenRouter/OpenAI
+  temperature: 0.7                # Response creativity
+  max_tokens: 256                 # Max response length
+  tools: []                       # MCP tool definitions (Phase 3)
+
+# Alternative LLM: OpenRouter (uncomment to use)
+# llm:
+#   provider: openai-compat
+#   model: "meta-llama/llama-3.1-70b-instruct"  # Any OpenRouter model
+#   base_url: "https://openrouter.ai/api/v1"
+#   api_key: "your-openrouter-api-key"
+#   temperature: 0.7
+#   max_tokens: 256
+
+# Alternative LLM: OpenAI Direct (uncomment to use)
+# llm:
+#   provider: openai-compat
+#   model: "gpt-4o-mini"          # Or "gpt-4o", "gpt-3.5-turbo"
+#   base_url: "https://api.openai.com/v1"
+#   api_key: "your-openai-api-key"
+#   temperature: 0.7
+#   max_tokens: 256
+
+personality:
+  active: hacker                  # Personality: hacker | seductive | butler | drill-sergeant | stoner-philosopher | custom
+  custom_prompt: ""               # Used if active == "custom"
+
+conversation:
+  memory_turns: 15                # Sliding window of conversation history
+  persist_across_sessions: false  # No cross-session persistence (agent handles this)
+
+echo_cancellation:
+  mode: mute                      # mute | speexdsp | none
+  speexdsp:
+    filter_length: 4096
+    frame_size: 512
+
+integrations:
+  hermes:
+    enabled: false
+    url: "ws://localhost:8765"
+    channel_name: "echo-node-voice"
+  openclaw:
+    enabled: false
+    skill_dir: "~/.openclaw/skills/echo-node"
+  mcp:
+    enabled: false
+    servers: []
+
+ui:
+  mode: web                       # web | headless
+  theme: minimal                  # minimal | cyberpunk | retro-terminal | glassmorphism
+  avatar:
+    model: random                 # "random" | specific VRM filename | path to custom .vrm
+    pool:                         # Avatar rotation pool
+      - "avatar-01-casual.vrm"
+      - "avatar-02-punk.vrm"
+      - "avatar-03-corporate.vrm"
+      - "avatar-04-anime.vrm"
+      - "avatar-05-robot.vrm"
+      - "avatar-06-witch.vrm"
+      - "avatar-07-pirate.vrm"
+      - "avatar-08-cyborg.vrm"
+      - "avatar-09-elf.vrm"
+      - "avatar-10-scientist.vrm"
+      - "avatar-11-ninja.vrm"
+      - "avatar-12-steampunk.vrm"
+    idle_animations: true
+    eye_tracking: true
+  port: 3000
+
+gateway:
+  port: 3000
+  bind: "127.0.0.1"               # 127.0.0.1 (localhost) | 0.0.0.0 (LAN access)
+  worker_url: "ws://localhost:9001"
+
+worker:
+  port: 9001
+  log_level: info                 # debug | info | warn | error
+
+# =============================================================================
+# Provider Switching Examples
+# =============================================================================
+# Quick reference for common provider configurations
+# =============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Example 1: Faster-Whisper STT + Piper TTS + Ollama LLM (All Local)
+# ─────────────────────────────────────────────────────────────────────────────
+# stt:
+#   provider: faster-whisper
+#   model: "Systran/faster-distil-whisper-large-v3"
+#   device: cuda
+#   language: en
+#
+# tts:
+#   provider: piper
+#   model: "en_US-amy-medium"
+#   device: cuda
+#   sample_rate: 22050
+#
+# llm:
+#   provider: ollama
+#   model: "llama3.2:7b-q4_K_M"
+#   base_url: "http://localhost:11434/v1"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Example 2: Sherpa-ONNX STT + Kokoro TTS + OpenRouter LLM (Hybrid)
+# ─────────────────────────────────────────────────────────────────────────────
+# stt:
+#   provider: sherpa-onnx
+#   model: "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+#   device: cuda
+#
+# tts:
+#   provider: kokoro
+#   model: "kokoro-v1.0"
+#   voice: "af_heart"
+#   device: cuda
+#
+# llm:
+#   provider: openai-compat
+#   model: "meta-llama/llama-3.1-70b-instruct"
+#   base_url: "https://openrouter.ai/api/v1"
+#   api_key: "sk-or-your-api-key"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Example 3: Sherpa-ONNX STT + Kokoro TTS + OpenAI GPT-4o (Cloud LLM)
+# ─────────────────────────────────────────────────────────────────────────────
+# stt:
+#   provider: sherpa-onnx
+#   model: "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+#   device: cuda
+#
+# tts:
+#   provider: kokoro
+#   model: "kokoro-v1.0"
+#   voice: "af_heart"
+#   device: cuda
+#
+# llm:
+#   provider: openai-compat
+#   model: "gpt-4o-mini"
+#   base_url: "https://api.openai.com/v1"
+#   api_key: "sk-your-openai-api-key"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Example 4: CPU-Only Configuration (No GPU)
+# ─────────────────────────────────────────────────────────────────────────────
+# stt:
+#   provider: sherpa-onnx
+#   model: "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+#   device: cpu
+#
+# tts:
+#   provider: piper
+#   model: "en_US-amy-medium"
+#   device: cpu
+#
+# llm:
+#   provider: ollama
+#   model: "llama3.2:3b-q4_K_M"   # Smaller model for CPU
+#   base_url: "http://localhost:11434/v1"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Example 5: Maximum Quality (GPU-Accelerated Everything)
+# ─────────────────────────────────────────────────────────────────────────────
+# stt:
+#   provider: faster-whisper
+#   model: "Systran/faster-whisper-large-v3"
+#   device: cuda
+#   compute_type: float16
+#
+# tts:
+#   provider: kokoro
+#   model: "kokoro-v1.0"
+#   voice: "af_heart"
+#   device: cuda
+#   streaming: true
+#
+# llm:
+#   provider: openai-compat
+#   model: "gpt-4o"
+#   base_url: "https://api.openai.com/v1"
+#   api_key: "sk-your-openai-api-key"
+#   temperature: 0.7
+#   max_tokens: 512

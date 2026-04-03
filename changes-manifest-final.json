@@ -1,0 +1,129 @@
+# Changes Manifest - Final
+**Generated**: 2026-03-29
+**Session**: Echo-Node Phase 3 US1 COMPLETE
+**Updated**: 2026-03-29 17:25
+
+---
+
+## Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total Files Created** | 26 |
+| **Total Files Modified** | 5 |
+| **Lines Added** | ~4,200 |
+| **Lines Removed** | ~250 |
+| **US1 Completion** | 25/25 (100%) |
+| **Total Progress** | 52/127 (41%) |
+
+---
+
+## Phase Completion
+
+| Phase | Status | Tasks |
+|-------|--------|-------|
+| Phase 1: Setup | ✅ Complete | 9/9 |
+| Phase 2: Foundational | ✅ Complete | 18/18 |
+| Phase 3: US1 (Wake Word Voice) | ✅ Complete | 25/25 |
+| Phase 4: US2 (Provider Switching) | ⏳ Pending | 0/11 |
+| Phase 5: US3 (Personality) | ⏳ Pending | 0/12 |
+| Phase 6: US4 (Avatar) | ⏳ Pending | 0/23 |
+| Phase 7: US5 (Cloud API) | ⏳ Pending | 0/8 |
+| Phase 8: US6 (Agent Integration) | ⏳ Pending | 0/10 |
+| Phase 9: Polish | ⏳ Pending | 0/11 |
+
+---
+
+## Key Deliverables
+
+### Core Voice Pipeline
+- Wake word detection (OpenWakeWord)
+- VAD speech capture (Silero-VAD)
+- Streaming STT (Sherpa-ONNX)
+- Streaming LLM (Ollama)
+- Streaming TTS (Kokoro)
+- Barge-in support
+- 5 personality presets
+- 15-turn conversation memory
+
+### Gateway Integration
+- Session manager (single active session)
+- WebSocket event relay
+- State tracking
+- REST API (/api/health, /api/config, /api/status)
+
+### Documentation
+- README.md (project overview)
+- test.sh (validation script)
+- setup-wsl2.md (WSL2 audio)
+- setup-fedora.md (Fedora Linux)
+- setup-macos.md (macOS)
+
+### Sound Assets
+- beep.wav (880Hz, 150ms)
+- chime.wav (1174Hz, 200ms)
+- silent.wav (placeholder)
+
+---
+
+## Files Created (26 total)
+
+**Worker (14 files)**:
+- main.py, config.py, state_machine.py, pipeline.py, vram_calculator.py
+- providers/base.py, providers/__init__.py
+- providers/stt/sherpa_stt.py
+- providers/tts/kokoro_tts.py
+- providers/vad/silero_vad.py
+- providers/wake_word/openwakeword.py
+- providers/llm/ollama_llm.py
+- audio/capture.py, audio/playback.py
+- streaming/sentence_chunker.py, streaming/conversation/memory.py
+- personalities/*.yaml (5 files)
+- sounds/beep.wav, sounds/chime.wav, sounds/silent.wav
+
+**Gateway (8 files)**:
+- src/index.ts
+- src/websocket.ts
+- src/sessions/session-manager.ts
+- src/routes/health.ts, routes/config.ts, routes/status.ts
+- src/utils/config-loader.ts, utils/types.ts, utils/logger.ts
+
+**Documentation (4 files)**:
+- README.md
+- test.sh
+- docs/setup-wsl2.md, setup-fedora.md, setup-macos.md
+
+**Configuration (3 files)**:
+- config.yaml, config.example.yaml
+- .gitignore
+
+**Work Logs (2 files)**:
+- .checkpoints/work-echo-node-phase3/work-log-2026-03-29.md
+- .checkpoints/work-echo-node-phase3/work-log-2026-03-29-session2.md
+
+---
+
+## Next Steps
+
+**Continue with Phase 4 (US2)**: Config-Only Provider Switching
+- Add faster-whisper STT provider
+- Add Piper TTS provider
+- Add OpenAI-compat LLM provider
+- Config validation improvements
+- Provider switching tests
+
+**Or Test MVP**:
+- Run `./setup.sh` to download models
+- Install audio libraries
+- Start worker + gateway
+- Test wake word conversation
+
+---
+
+## Resume Command
+
+```
+resume echo-node-phase3
+```
+
+Last checkpoint: Session 2 complete, US1 100% done.

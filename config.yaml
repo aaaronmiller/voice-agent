@@ -1,0 +1,93 @@
+# Echo-Node Configuration - Optimized for 4GB VRAM
+
+echo_node:
+  name: "Gimp"
+  version: "1.0.0"
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 512
+  device: null
+
+pipeline_mode: local
+
+wake_word:
+  provider: openwakeword
+  model: "models/wake_word/openwakeword-1.0.tflite"
+  threshold: 0.5
+  cooldown_ms: 2000
+
+activation_sound:
+  enabled: true
+  sound: beep
+
+vad:
+  provider: silero
+  threshold: 0.5
+  min_speech_ms: 250
+  max_silence_ms: 1500
+
+# STT: Sherpa-ONNX (~500MB VRAM)
+stt:
+  provider: sherpa-onnx
+  model: "models/stt/sherpa-onnx-streaming-zipformer-en-2023-06-26"
+  device: cuda
+  language: en
+
+# TTS: Kokoro (~256MB VRAM)
+tts:
+  provider: kokoro
+  model: "models/tts/kokoro-v1.0"
+  voice: af_heart
+  device: cuda
+  streaming: true
+  sample_rate: 24000
+
+# LLM: Phi-4 q4 (~3GB VRAM) - excellent performance
+llm:
+  provider: ollama
+  model: "phi4:latest"
+  base_url: "http://localhost:11434"
+  api_key: ""
+  temperature: 0.7
+  max_tokens: 256
+
+personality:
+  active: hacker
+  custom_prompt: ""
+
+conversation:
+  memory_turns: 15
+  persist_across_sessions: false
+
+echo_cancellation:
+  mode: mute
+  speexdsp:
+    filter_length: 4096
+    frame_size: 512
+
+integrations:
+  hermes:
+    enabled: false
+    url: "ws://localhost:8765"
+    channel_name: "echo-node-voice"
+  openclaw:
+    enabled: false
+    skill_dir: "~/.openclaw/skills/echo-node"
+  mcp:
+    enabled: false
+    servers: []
+
+ui:
+  mode: headless
+  theme: minimal
+
+gateway:
+  port: 3000
+  bind: "127.0.0.1"
+  worker_url: "ws://localhost:9001"
+
+worker:
+  port: 9001
+  log_level: info

@@ -1,0 +1,34 @@
+{
+  "name": "echo-node-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
+  },
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "@sveltejs/adapter-static": "^3.0.0",
+    "three": "^0.160.0",
+    "@pixiv/three-vrm": "^2.0.0",
+    "talkinghead": "github:met4citizen/TalkingHead"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "@types/three": "^0.160.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0",
+    "@testing-library/svelte": "^4.0.0",
+    "eslint": "^8.56.0",
+    "eslint-plugin-svelte": "^2.35.0",
+    "prettier": "^3.1.0",
+    "prettier-plugin-svelte": "^3.1.0"
+  }
+}
