@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+if [[ -x .venv/bin/python ]]; then
+  exec .venv/bin/python tools/deploy_wizard.py "$@"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 tools/deploy_wizard.py "$@"
+fi
+
+echo "ERROR: python3 not found. Run ./setup.sh first." >&2
+exit 1

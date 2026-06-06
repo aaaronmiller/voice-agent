@@ -1,0 +1,8 @@
+numpy>=1.26
+huggingface_hub[hf_transfer]>=0.23
+onnx-asr>=0.5.1
+onnxruntime>=1.18
+openwakeword>=0.6.0
+pyyaml>=6.0
+requests>=2.31
+soundfile>=0.12

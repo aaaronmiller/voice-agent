@@ -1,0 +1,41 @@
+assistant:
+  wake_phrase: "samantha"
+  exit_phrases:
+    - "quit"
+    - "exit"
+    - "stop listening"
+
+audio:
+  sample_rate: 16000
+  chunk_size: 1280
+  arecord_device: default
+  silence_rms_threshold: 450
+  silence_seconds: 1.1
+  max_record_seconds: 15
+  min_record_seconds: 0.4
+
+wake_word:
+  enabled: true
+  backend: openwakeword
+  sensitivity: 0.35
+  model_paths:
+    - /home/misscheta/code/RealtimeSTT/tests/suh_man_tuh.onnx
+    - /home/misscheta/code/RealtimeSTT/tests/suh_mahn_thuh.onnx
+
+stt:
+  provider: onnx-asr
+  model_name: nemo-parakeet-tdt-0.6b-v2
+  quantization: int8
+
+llm:
+  provider: ollama
+  base_url: http://127.0.0.1:11434
+  model: ""
+  system_prompt: "You are a concise local voice assistant. Answer in one or two short sentences."
+  timeout_seconds: 45
+
+tts:
+  provider: espeak-ng
+  voice: en-us
+  speed: 165
+  pitch: 45

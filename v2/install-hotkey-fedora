@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCHEMA="org.gnome.settings-daemon.plugins.media-keys"
+BASE="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+NAME="${ECHO_NODE_HOTKEY_NAME:-Echo-Node Voice Assistant}"
+BINDING="${ECHO_NODE_HOTKEY:-<Control><Alt>V}"
+COMMAND="$ROOT/launch-terminal.sh"
+ENTRY="$BASE/echo-node-voice/"
+
+if ! command -v gsettings >/dev/null 2>&1; then
+  echo "ERROR: gsettings not found. This installer targets GNOME on Fedora." >&2
+  exit 1
+fi
+
+chmod +x "$ROOT/launch-terminal.sh"
+
+current="$(gsettings get "$SCHEMA" custom-keybindings)"
+python3 - "$current" "$ENTRY" <<'PY' > /tmp/echo-node-keybindings.txt
+import ast
+import sys
+
+try:
+    values = ast.literal_eval(sys.argv[1])
+except Exception:
+    values = []
+entry = sys.argv[2]
+if entry not in values:
+    values.append(entry)
+print(repr(values))
+PY
+
+gsettings set "$SCHEMA" custom-keybindings "$(cat /tmp/echo-node-keybindings.txt)"
+gsettings set "$SCHEMA.custom-keybinding:$ENTRY" name "$NAME"
+gsettings set "$SCHEMA.custom-keybinding:$ENTRY" command "$COMMAND"
+gsettings set "$SCHEMA.custom-keybinding:$ENTRY" binding "$BINDING"
+
+echo "Installed GNOME hotkey:"
+echo "  $BINDING -> $COMMAND"
+echo
+echo "Override with:"
+echo "  ECHO_NODE_HOTKEY='<Super>space' ./install-hotkey-fedora"

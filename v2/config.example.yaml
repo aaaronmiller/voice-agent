@@ -1,0 +1,84 @@
+assistant:
+  name: "Echo Node"
+  wake_phrase: "hey jarvis"
+  exit_phrases:
+    - "quit"
+    - "exit"
+    - "stop listening"
+  system_prompt: "You are a concise local voice assistant. Keep spoken replies brief."
+
+audio:
+  backend: alsa
+  sample_rate: 16000
+  chunk_size: 1280
+  arecord_device: default
+  playback_device: default
+  input_device: null
+  output_device: null
+
+wake_word:
+  enabled: true
+  sensitivity: 0.35
+  pretrained:
+    - hey_jarvis
+  model_paths: []
+
+vad:
+  provider: silero-openwakeword
+  speech_threshold: 0.48
+  silence_seconds: 0.85
+  max_record_seconds: 18
+  min_record_seconds: 0.45
+  wake_speech_timeout_seconds: 6
+  rms_floor: 350
+
+barge_in:
+  enabled: true
+  min_speech_seconds: 0.22
+  min_playback_age_seconds: 0.45
+  resume_false_interruptions: false
+
+hotkeys:
+  enabled: true
+  terminal_enter: true
+
+performance:
+  preload_stt: true
+  warm_tts: true
+  warm_backend: false
+
+stt:
+  provider: onnx-asr
+  model_name: nemo-parakeet-tdt-0.6b-v2
+  quantization: int8
+  providers:
+    - CPUExecutionProvider
+
+llm:
+  provider: ollama
+  base_url: http://127.0.0.1:11434
+  model: ""
+  timeout_seconds: 60
+  max_history_turns: 8
+  keep_alive: 30m
+
+tts:
+  provider: kokoro
+  voice: af_heart
+  speed: 1.0
+  model_path: models/kokoro/kokoro-v1.0.onnx
+  voices_path: models/kokoro/voices-v1.0.bin
+  fallback_provider: espeak-ng
+  espeak_voice: en-us
+  espeak_speed: 165
+  espeak_pitch: 45
+
+# Floating animated avatar (bottom-right of primary screen) lip-synced to the TTS WAV.
+# Requires PyQt6 in the v2 venv and the Rhubarb Lip Sync binary at
+# v2/vendor/rhubarb/rhubarb (or on $PATH). Disable by setting enabled: false.
+avatar:
+  enabled: false
+  character: raccoon-hacker     # raccoon-hacker, owl-wizard, axolotl-astronaut, axolotl-helmet, raccoon-cyber
+  recognizer: phonetic          # rhubarb recognizer: phonetic (fast) or pocketSphinx
+  extended_shapes: GH           # optional extra mouth shapes
+  rhubarb_path: null            # null = auto-detect

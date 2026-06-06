@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+BASE_URL="${ODYSSEUS_BASE_URL:-http://127.0.0.1:7000}"
+API_TOKEN="${ODYSSEUS_API_TOKEN:-}"
+MODEL="${ODYSSEUS_MODEL:-}"
+
+usage() {
+  cat <<USAGE
+Usage: ODYSSEUS_API_TOKEN=ody_... ODYSSEUS_BASE_URL=http://127.0.0.1:7000 ./integrate-odysseus
+
+Configures Echo-Node v2 to route spoken turns to Odysseus /api/v1/chat.
+The token must be an Odysseus API token with chat scope.
+USAGE
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ -z "$API_TOKEN" ]]; then
+  echo "ERROR: Set ODYSSEUS_API_TOKEN to a chat-scoped Odysseus API token." >&2
+  echo "Create it in Odysseus Settings/API Tokens, then rerun this script." >&2
+  exit 1
+fi
+
+if [[ ! -f config.yaml ]]; then
+  cp config.example.yaml config.yaml
+fi
+
+.venv/bin/python - <<PY
+from pathlib import Path
+import yaml
+
+path = Path("config.yaml")
+config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+llm = config.setdefault("llm", {})
+llm["provider"] = "odysseus"
+llm["base_url"] = "${BASE_URL}"
+llm["model"] = "${MODEL}"
+llm["api_key"] = "${API_TOKEN}"
+path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+PY
+
+cat <<EOF
+Echo-Node now routes to Odysseus:
+  provider: odysseus
+  base_url: ${BASE_URL}
+  model: ${MODEL:-'(Odysseus default/fallback endpoint)'}
+
+Odysseus must be running at ${BASE_URL}, and the API token must include chat scope.
+Test the route with:
+  curl -s -H "Authorization: Bearer \$ODYSSEUS_API_TOKEN" \\
+    -H "Content-Type: application/json" \\
+    -d '{"message":"ping"}' \\
+    ${BASE_URL}/api/v1/chat
+
+Then run:
+  ./run.sh
+EOF

@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+BASE_URL="${HERMES_BASE_URL:-http://127.0.0.1:8642/v1}"
+MODEL="${HERMES_MODEL:-hermes-agent}"
+API_KEY="${HERMES_API_KEY:-${API_SERVER_KEY:-}}"
+
+usage() {
+  cat <<USAGE
+Usage: HERMES_BASE_URL=http://127.0.0.1:8642/v1 HERMES_API_KEY=... ./integrate-hermes
+
+Configures Echo-Node v2 to route spoken turns to Hermes Agent's OpenAI-compatible
+API server. It edits only v2/config.yaml.
+USAGE
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ! -f config.yaml ]]; then
+  cp config.example.yaml config.yaml
+fi
+
+.venv/bin/python - <<PY
+from pathlib import Path
+import yaml
+
+path = Path("config.yaml")
+config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+llm = config.setdefault("llm", {})
+llm["provider"] = "hermes"
+llm["base_url"] = "${BASE_URL}"
+llm["model"] = "${MODEL}"
+llm["api_key"] = "${API_KEY}"
+path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+PY
+
+cat <<EOF
+Echo-Node now routes to Hermes:
+  provider: hermes
+  base_url: ${BASE_URL}
+  model: ${MODEL}
+
+Hermes must have its API server platform enabled. In ~/.hermes/config.yaml or
+Hermes environment, use the equivalent of:
+
+platforms:
+  api_server:
+    enabled: true
+    extra:
+      host: "127.0.0.1"
+      port: 8642
+      key: "${API_KEY}"
+
+Then run or restart the Hermes gateway and test:
+  curl -s ${BASE_URL%/v1}/health
+  ./run.sh
+EOF

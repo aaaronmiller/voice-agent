@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+if [[ ! -x .venv/bin/python ]]; then
+  echo "Missing .venv. Run ./setup.sh first." >&2
+  exit 1
+fi
+
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+  echo "nvidia-smi not found; CUDA STT acceleration is unavailable." >&2
+  exit 1
+fi
+
+.venv/bin/python -m pip install \
+  onnxruntime-gpu \
+  nvidia-cublas-cu12 \
+  nvidia-cuda-runtime-cu12 \
+  nvidia-cuda-nvrtc-cu12 \
+  nvidia-cudnn-cu12 \
+  nvidia-cufft-cu12 \
+  nvidia-curand-cu12 \
+  nvidia-cusolver-cu12 \
+  nvidia-cusparse-cu12
+
+source "$ROOT/env.sh"
+echo_node_export_nvidia_libs "$ROOT"
+
+.venv/bin/python - <<'PY'
+from assistant_v2 import ParakeetSTT
+import onnxruntime as ort
+
+providers = ort.get_available_providers()
+print("ONNX Runtime providers:", providers)
+if "CUDAExecutionProvider" not in providers:
+    raise SystemExit("CUDAExecutionProvider is not available")
+
+stt = ParakeetSTT({
+    "model_name": "nemo-parakeet-tdt-0.6b-v2",
+    "quantization": "int8",
+    "providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+})
+stt.load()
+print("CUDA STT load check passed.")
+PY

@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+ASSUME_YES="${ASSUME_YES:-0}"
+
+say() { printf '%s\n' "$*"; }
+
+confirm() {
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    return 0
+  fi
+  read -r -p "$1 [y/N] " answer
+  [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
+}
+
+if ! grep -qi microsoft /proc/version 2>/dev/null; then
+  say "WARNING: This does not look like WSL2. Continuing anyway."
+fi
+
+say "Echo-Node v2 WSL2 installer"
+say "==========================="
+
+if [[ -e /mnt/wslg/PulseServer ]]; then
+  PULSE_SOCKET="/mnt/wslg/PulseServer"
+elif [[ -e /mnt/wslg/runtime-dir/pulse/native ]]; then
+  PULSE_SOCKET="/mnt/wslg/runtime-dir/pulse/native"
+else
+  PULSE_SOCKET=""
+fi
+
+if [[ -z "$PULSE_SOCKET" ]]; then
+  say "ERROR: WSLg PulseAudio socket not found under /mnt/wslg."
+  say "Run this from Windows 11 WSL2 with WSLg enabled, then try again."
+  exit 1
+fi
+
+say "Using WSLg PulseAudio socket: $PULSE_SOCKET"
+
+if command -v apt-get >/dev/null 2>&1; then
+  say "Installing WSL audio and Python packages with apt..."
+  sudo apt-get update
+  sudo apt-get install -y \
+    alsa-utils \
+    libasound2-plugins \
+    pulseaudio-utils \
+    curl \
+    python3.11 \
+    python3.11-venv \
+    espeak-ng
+else
+  say "apt-get not found. Install alsa-utils, ALSA pulse plugin, Python 3.11 venv, curl, and espeak-ng manually."
+fi
+
+MARKER_BEGIN="# >>> echo-node-v2-wsl2-audio >>>"
+MARKER_END="# <<< echo-node-v2-wsl2-audio <<<"
+EXPORT_BLOCK="$MARKER_BEGIN
+export PULSE_SERVER=unix:$PULSE_SOCKET
+export SDL_AUDIODRIVER=pulse
+$MARKER_END"
+
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  touch "$rc"
+  if ! grep -qF "$MARKER_BEGIN" "$rc"; then
+    {
+      printf '\n%s\n' "$EXPORT_BLOCK"
+    } >> "$rc"
+    say "Added WSL audio environment to $rc"
+  else
+    say "Audio environment marker already present in $rc"
+  fi
+done
+
+export PULSE_SERVER="unix:$PULSE_SOCKET"
+export SDL_AUDIODRIVER=pulse
+
+ASOUNDRC="$HOME/.asoundrc"
+ASOUND_BLOCK='pcm.!default {
+    type pulse
+}
+
+ctl.!default {
+    type pulse
+}'
+
+if [[ -f "$ASOUNDRC" ]] && ! grep -q "type pulse" "$ASOUNDRC"; then
+  say "Existing ~/.asoundrc does not route default ALSA to PulseAudio."
+  if confirm "Back up ~/.asoundrc and replace it with a WSLg PulseAudio default?"; then
+    cp "$ASOUNDRC" "$ASOUNDRC.echo-node-v2.bak"
+    printf '%s\n' "$ASOUND_BLOCK" > "$ASOUNDRC"
+    say "Wrote $ASOUNDRC and saved backup at $ASOUNDRC.echo-node-v2.bak"
+  else
+    say "Keeping existing ~/.asoundrc. If audio fails, update ALSA default manually."
+  fi
+elif [[ ! -f "$ASOUNDRC" ]]; then
+  printf '%s\n' "$ASOUND_BLOCK" > "$ASOUNDRC"
+  say "Wrote $ASOUNDRC"
+fi
+
+say "Running v2 setup..."
+./setup.sh
+
+say "Configuring v2 for WSL2 ALSA/PulseAudio..."
+.venv/bin/python - <<'PY'
+from pathlib import Path
+import yaml
+
+path = Path("config.yaml")
+config = yaml.safe_load(path.read_text()) or {}
+audio = config.setdefault("audio", {})
+audio["backend"] = "alsa"
+audio["arecord_device"] = "default"
+audio["playback_device"] = "default"
+audio["input_device"] = None
+audio["output_device"] = None
+config.setdefault("wake_word", {})["pretrained"] = ["hey_jarvis"]
+config["wake_word"]["model_paths"] = []
+path.write_text(yaml.safe_dump(config, sort_keys=False))
+PY
+
+say "Running v2 tests..."
+./test.sh
+
+say "Testing one second of WSL2 microphone capture..."
+BYTES="$(arecord -q -D default -f S16_LE -c 1 -r 16000 -t raw -d 1 | wc -c)"
+say "Captured bytes: $BYTES"
+if [[ "$BYTES" != "32000" ]]; then
+  say "WARNING: Expected 32000 bytes for one second at 16 kHz mono 16-bit."
+fi
+
+say "Synthesizing and playing one Kokoro audio probe..."
+.venv/bin/python - <<'PY'
+from pathlib import Path
+from assistant_v2 import KokoroTTS
+
+tts = KokoroTTS({
+    "model_path": "models/kokoro/kokoro-v1.0.onnx",
+    "voices_path": "models/kokoro/voices-v1.0.bin",
+    "voice": "af_heart",
+    "speed": 1.0,
+})
+tts.synthesize_to_wav("Echo Node WSL two audio test.", Path("/tmp/echo-node-v2-wsl-test.wav"))
+PY
+aplay -q -D default /tmp/echo-node-v2-wsl-test.wav
+
+say
+say "WSL2 install complete."
+say "Restart your shell or run: source ~/.zshrc"
+say "Then run: cd '$ROOT' && ./run.sh"

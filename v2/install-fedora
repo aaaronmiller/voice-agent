@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+ASSUME_YES="${ASSUME_YES:-0}"
+
+say() { printf '%s\n' "$*"; }
+
+need_sudo() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+say "Echo-Node v2 Fedora installer"
+say "============================="
+
+if ! command -v dnf >/dev/null 2>&1; then
+  say "ERROR: dnf was not found. Use ./setup.sh on non-Fedora Linux."
+  exit 1
+fi
+
+say "Installing Fedora audio and Python dependencies..."
+need_sudo dnf install -y \
+  alsa-utils \
+  pipewire \
+  pipewire-alsa \
+  pipewire-pulseaudio \
+  wireplumber \
+  espeak-ng \
+  curl \
+  python3 \
+  python3-pip
+
+systemctl --user start pipewire pipewire-pulse wireplumber 2>/dev/null || true
+
+if ! command -v python3.11 >/dev/null 2>&1; then
+  if python3 - <<'PY'
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
+PY
+  then
+    say "Using python3 because it is >= 3.11."
+  else
+    say "ERROR: Python 3.11+ is required. Install python3.11 or a newer Fedora python3."
+    exit 1
+  fi
+fi
+
+say "Running v2 setup..."
+./setup.sh
+
+say "Configuring v2 for Fedora PipeWire through ALSA..."
+.venv/bin/python - <<'PY'
+from pathlib import Path
+import yaml
+
+path = Path("config.yaml")
+config = yaml.safe_load(path.read_text()) or {}
+audio = config.setdefault("audio", {})
+audio["backend"] = "alsa"
+audio["arecord_device"] = "default"
+audio["playback_device"] = "default"
+audio["input_device"] = None
+audio["output_device"] = None
+path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+PY
+
+say "Running v2 tests..."
+./test.sh
+
+say "Testing one second of microphone capture..."
+BYTES="$(arecord -q -D default -f S16_LE -c 1 -r 16000 -t raw -d 1 | wc -c)"
+say "Captured bytes: $BYTES"
+if [[ "$BYTES" != "32000" ]]; then
+  say "WARNING: Expected 32000 bytes for one second at 16 kHz mono 16-bit."
+fi
+
+say "Synthesizing and playing one Kokoro audio probe..."
+.venv/bin/python - <<'PY'
+from pathlib import Path
+from assistant_v2 import KokoroTTS
+
+tts = KokoroTTS({
+    "model_path": "models/kokoro/kokoro-v1.0.onnx",
+    "voices_path": "models/kokoro/voices-v1.0.bin",
+    "voice": "af_heart",
+    "speed": 1.0,
+})
+tts.synthesize_to_wav("Echo Node Fedora audio test.", Path("/tmp/echo-node-v2-fedora-test.wav"))
+PY
+aplay -q -D default /tmp/echo-node-v2-fedora-test.wav
+
+say
+say "Fedora install complete. Run: cd '$ROOT' && ./run.sh"

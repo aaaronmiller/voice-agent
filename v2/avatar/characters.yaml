@@ -1,0 +1,105 @@
+# Avatar character manifest.
+#
+# Each character points at a source sprite sheet under v2/avatar/sources/
+# and maps the 9 Rhubarb visemes to grid cell indices (row-major, 0-based).
+#
+# Rhubarb visemes (https://github.com/DanielSWolf/rhubarb-lip-sync):
+#   X = idle / closed (rest)
+#   A = closed lips for P, B, M
+#   B = slightly open mouth for K, S, T
+#   C = open mouth for EH, AE
+#   D = wide open mouth for AA
+#   E = slightly rounded mouth for AO, ER
+#   F = puckered lips for UW, OW, W
+#   G = upper teeth on lower lip for F, V        (extended)
+#   H = tongue raised behind teeth for L         (extended)
+#
+# `crop` is optional. If present it trims the source before slicing into cells.
+
+default: raccoon-hacker
+
+characters:
+
+  raccoon-hacker:
+    source: sources/raccoon-hacker.png
+    grid: { cols: 3, rows: 3 }
+    # Order (top-left to bottom-right):
+    # row1: closed-smirk, closed-content, slight-open-teeth
+    # row2: slight-open,  wide-aah,        rounded-oh
+    # row3: puckered-ooo, clenched-teeth,  tongue-out
+    visemes:
+      X: 1   # idle (closed content)
+      A: 0   # M/B/P (closed smirk)
+      B: 2   # K/S/T (slight open showing teeth)
+      C: 3   # EH    (slight open mid)
+      D: 4   # AA    (wide open)
+      E: 5   # AO    (rounded oh)
+      F: 6   # UW    (puckered ooo)
+      G: 7   # F/V   (clenched teeth, closest)
+      H: 8   # L     (tongue out)
+
+  owl-wizard:
+    source: sources/owl-wizard.png
+    grid: { cols: 3, rows: 3 }
+    # row1: closed-neutral, closed-soft, slight-open
+    # row2: open-eh,        wide-aah,    rounded-oh
+    # row3: closed-neutral, closed,      tongue-out
+    visemes:
+      X: 0
+      A: 1
+      B: 2
+      C: 3
+      D: 4
+      E: 5
+      F: 5   # no clean puckered — reuse rounded
+      G: 6   # closed (fallback)
+      H: 8
+
+  axolotl-astronaut:
+    source: sources/axolotl-astronaut.png
+    grid: { cols: 3, rows: 3 }
+    # row1: closed-peace, closed-soft,   slight-parted
+    # row2: open-eh,      wide-aah,      rounded-oh
+    # row3: puckered,     grimace-teeth, tongue-out
+    visemes:
+      X: 0
+      A: 1
+      B: 2
+      C: 3
+      D: 4
+      E: 5
+      F: 6
+      G: 7
+      H: 8
+
+  axolotl-helmet:
+    source: sources/axolotl-helmet.png
+    grid: { cols: 3, rows: 3 }
+    visemes:
+      X: 0
+      A: 1
+      B: 2
+      C: 3
+      D: 4
+      E: 5
+      F: 6
+      G: 7
+      H: 8
+
+  raccoon-cyber:
+    source: sources/raccoon-cyber-3x4.png
+    grid: { cols: 4, rows: 3 }
+    # 12 cells, mapped (visual inspection):
+    # row1: closed1, closed2,  closed-smile, closed-sly
+    # row2: closed-pursed, wide-aah, slight-open-eh, rounded-oh
+    # row3: closed-content, puckered, clenched-teeth, tongue-out
+    visemes:
+      X: 0
+      A: 4
+      B: 6
+      C: 6
+      D: 5
+      E: 7
+      F: 9
+      G: 10
+      H: 11
