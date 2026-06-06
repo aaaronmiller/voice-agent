@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(v2/.venv/bin/python -m pip list)",
+      "Bash(command rm -f rhubarb.zip)",
+      "Bash(./rhubarb/rhubarb --version)",
+      "Bash(./rhubarb/rhubarb --help)",
+      "Bash(command rm -f v2/vendor/rhubarb.zip)",
+      "Bash(v2/vendor/rhubarb/rhubarb --version)",
+      "Bash(v2/vendor/rhubarb/rhubarb --help)",
+      "Bash(v2/.venv/bin/pip install *)",
+      "Bash(v2/.venv/bin/python -c \"from PyQt6 import QtWidgets, QtGui, QtCore; print\\('PyQt6:', QtCore.PYQT_VERSION_STR, 'Qt:', QtCore.QT_VERSION_STR\\); from PIL import Image; print\\('Pillow:', Image.__version__\\)\")",
+      "Bash(cat)",
+      "Bash(v2/.venv/bin/python /tmp/rhubarb_smoke.py)",
+      "Bash(.venv/bin/python -m avatar.preprocess raccoon-hacker)",
+      "Bash(.venv/bin/python -m avatar.preprocess)"
+    ]
+  }
+}
