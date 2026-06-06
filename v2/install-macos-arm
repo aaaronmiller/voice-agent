@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+ASSUME_YES="${ASSUME_YES:-0}"
+
+say() { printf '%s\n' "$*"; }
+
+confirm() {
+  if [[ "$ASSUME_YES" == "1" ]]; then
+    return 0
+  fi
+  read -r -p "$1 [y/N] " answer
+  [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
+}
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  say "WARNING: This installer is for macOS ARM. Continuing anyway."
+fi
+
+ARCH="$(uname -m)"
+if [[ "$ARCH" != "arm64" && "$ARCH" != "aarch64" ]]; then
+  say "NOTE: Detected architecture '$ARCH'. This script is optimized for Apple Silicon arm64."
+fi
+
+say "Echo-Node v2 macOS ARM installer"
+say "================================="
+
+if ! command -v brew >/dev/null 2>&1; then
+  say "Homebrew not found."
+  if confirm "Install Homebrew (recommended for dependencies)?"; then
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> "$HOME/.zprofile"
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  else
+    say "Proceeding without Homebrew. You'll need ALSA/PulseAudio equivalents."
+  fi
+fi
+
+if command -v brew >/dev/null 2>&1; then
+  say "Installing macOS dependencies with brew..."
+  brew install espeak-ng python@3.11 portaudio
+else
+  say "Installing Python dependencies via ensurepip..."
+  python3 -m ensurepip --upgrade || true
+fi
+
+say "Running v2 setup..."
+./setup.sh
+
+say "Configuring v2 for macOS audio..."
+
+VENV_PYTHON="$ROOT/.venv/bin/python"
+if [[ ! -x "$VENV_PYTHON" ]]; then
+  say "ERROR: v2 venv not found at $VENV_PYTHON. Run ./setup.sh first."
+  exit 1
+fi
+
+"$VENV_PYTHON" - <<'PY'
+from pathlib import Path
+import yaml
+
+path = Path("config.yaml")
+config = yaml.safe_load(path.read_text()) or {}
+audio = config.setdefault("audio", {})
+audio["backend"] = "sounddevice"
+audio["arecord_device"] = "default"
+audio["playback_device"] = "default"
+audio["input_device"] = None
+audio["output_device"] = None
+path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+PY
+
+say "Running v2 tests..."
+./test.sh
+
+say
+say "macOS ARM install complete. Run: cd '$ROOT' && ./run.sh"
+say
+say "Notes:"
+say "  - Grant microphone permissions when the OS prompts."
+say "  - First run may take 30-60s while models load."

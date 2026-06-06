@@ -27,13 +27,13 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 TITLE = r"""
-  ______     __              _   __          __
- / ____/____/ /_  ____      / | / /___  ____/ /__
-/ __/ / ___/ __ \/ __ \    /  |/ / __ \/ __  / _ \
-/ /___/ /__/ / / / /_/ /   / /|  / /_/ / /_/ /  __/
-/_____/\___/_/ /_/\____/   /_/ |_/\____/\__,_/\___/
+   ______     __              _   __          __
+  / ____/____/ /_  ____      / | / /___  ____/ /__
+ / __/ / ___/ __ \/ __ \    /  |/ / __ \/ __  / _ \
+ / /___/ /__/ / / / /_/ /   / /|  / /_/ / /_/ /  __/
+ /_____/\___/_/ /_/\____/   /_/ |_/\____/\__,_/\___/
 
-        local wake word + Parakeet STT + Kokoro TTS
+         local wake word + Parakeet STT + Kokoro TTS
 """
 
 
@@ -142,6 +142,76 @@ def configure_voice() -> None:
     run([sys.executable, "tools/choose_voice.py", "--voices", *voices])
 
 
+def _load_avatar_characters() -> tuple[list[tuple[str, str]], dict[str, str]]:
+    from avatar import build as build_avatar  # noqa: E402
+
+    manifest = build_avatar._load_manifest(ROOT / "avatar")
+    options: list[tuple[str, str]] = []
+    mapping: dict[str, str] = {}
+    for name in manifest.get("characters", {}):
+        label = name.replace("raccoon-hacker", "Raccoon Hacker").replace("owl-wizard", "Owl Wizard").replace("axolotl-astronaut", "Axolotl Astronaut").replace("axolotl-helmet", "Axolotl Helmet").replace("raccoon-cyber", "Raccoon Cyber").replace("-", " ").title()
+        options.append((name, label))
+        mapping[label.lower()] = name
+    return options, mapping
+
+
+def configure_avatar() -> None:
+    config = load_config()
+    avatar = config.setdefault("avatar", {})
+
+    if not confirm("Enable floating avatar (lip-synced)?", bool(avatar.get("enabled", False))):
+        avatar["enabled"] = False
+        save_config(config)
+        say(f"{GREEN}Avatar disabled.{RESET}")
+        return
+
+    try:
+        options, _mapping = _load_avatar_characters()
+    except Exception as exc:
+        say(f"{RED}Could not load avatar manifest: {exc}{RESET}")
+        if not confirm("Continue without avatar selection?"):
+            avatar["enabled"] = False
+            save_config(config)
+        return
+
+    current_character = str(avatar.get("character") or options[0][0] if options else "")
+    character_options = [(name, label) for name, label in options]
+    selected = choose("Select avatar character", character_options)
+    character = selected if selected else current_character
+
+    if confirm("Preview avatar before saving?", True):
+        try:
+            run([sys.executable, "tools/avatar_smoke.py", character])
+        except subprocess.CalledProcessError:
+            say(f"{YELLOW}Preview failed for {character}.{RESET}")
+            if not confirm("Continue with this character anyway?"):
+                if not confirm("Pick a different character?"):
+                    avatar["enabled"] = False
+                    save_config(config)
+                    return
+
+                character = choose("Select avatar character", character_options)
+
+    avatar["enabled"] = True
+    avatar["character"] = character
+    avatar["recognizer"] = prompt("Rhubarb recognizer (phonetic/pocketSphinx)", str(avatar.get("recognizer") or "phonetic"))
+    avatar["extended_shapes"] = prompt("Extended mouth shapes (blank=none)", str(avatar.get("extended_shapes") or "GH")).strip() or "GH"
+    avatar["rhubarb_path"] = prompt("Rhubarb path (blank=auto-detect)", str(avatar.get("rhubarb_path") or "")) or None
+
+    if confirm("Run frame preprocessor for this character now?", True):
+        try:
+            run([sys.executable, "-m", "avatar.preprocess", character])
+        except subprocess.CalledProcessError:
+            say(f"{YELLOW}Preprocess failed. Ensure the source sprite sheet exists under avatar/sources.{RESET}")
+            if not confirm("Save avatar config anyway?"):
+                avatar["enabled"] = False
+                save_config(config)
+                return
+
+    save_config(config)
+    say(f"{GREEN}Saved avatar configuration.{RESET}")
+
+
 def configure_wake_vad_hotkeys() -> None:
     config = load_config()
     wake = config.setdefault("wake_word", {})
@@ -185,8 +255,28 @@ def configure_wake_vad_hotkeys() -> None:
 
 def platform_setup() -> None:
     system = platform.system().lower()
-    options = [("fedora", "Fedora 43 / GNOME / PipeWire"), ("wsl2", "WSL2 Ubuntu with WSLg audio"), ("windows", "Native Windows"), ("generic", "Generic setup.sh")]
-    default_hint = "windows" if system == "windows" else "generic"
+    if system == "darwin":
+        default_hint = "macos-arm"
+        options = [
+            ("macos-arm", "macOS ARM (Apple Silicon)"),
+            ("generic", "Generic setup.sh"),
+        ]
+    elif system == "windows":
+        default_hint = "windows"
+        options = [
+            ("windows", "Native Windows"),
+            ("wsl2", "WSL2 Ubuntu with WSLg audio"),
+            ("fedora", "Fedora 43 / GNOME / PipeWire"),
+            ("generic", "Generic setup.sh"),
+        ]
+    else:
+        default_hint = "fedora" if "fedora" in (platform.version() + " " + platform.platform()).lower() else "generic"
+        options = [
+            ("fedora", "Fedora 43 / GNOME / PipeWire"),
+            ("wsl2", "WSL2 Ubuntu with WSLg audio"),
+            ("windows", "Native Windows"),
+            ("generic", "Generic setup.sh"),
+        ]
     choice = choose(f"Platform setup ({default_hint} detected)", options)
     if choice == "fedora":
         run(["./install-fedora"])
@@ -195,6 +285,11 @@ def platform_setup() -> None:
     elif choice == "windows":
         say("Run this from PowerShell:")
         say(r"  .\install-windows.ps1")
+    elif choice == "macos-arm":
+        say("Run the macOS installer:")
+        say(r"  ./install-macos-arm")
+        if confirm("Run it now?", True):
+            run(["./install-macos-arm"])
     else:
         run(["./setup.sh"])
 
@@ -220,6 +315,7 @@ def main() -> int:
         ("Run platform setup", platform_setup),
         ("Configure backend provider", configure_backend),
         ("Choose Kokoro voice", configure_voice),
+        ("Configure avatar selection and lip-sync", configure_avatar),
         ("Tune wake word, VAD, barge-in, and hotkeys", configure_wake_vad_hotkeys),
         ("Record custom wake-word samples", record_wake_samples),
         ("Install launch hotkey", install_launch_hotkey),
@@ -232,9 +328,9 @@ def main() -> int:
         say(CYAN + TITLE + RESET)
         for idx, (label, _action) in enumerate(actions, 1):
             say(f"  {idx}. {label}")
-        say("  9. Exit")
-        raw = prompt("Select", "9")
-        if raw == "9":
+        say("  0. Exit")
+        raw = prompt("Select", "0")
+        if raw == "0":
             return 0
         try:
             idx = int(raw) - 1
