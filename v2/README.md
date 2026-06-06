@@ -101,7 +101,7 @@ On native Windows after `install-windows.ps1`:
 .\.venv\Scripts\python.exe assistant_v2.py
 ```
 
-Default wake phrase is `hey jarvis`, using OpenWakeWord's official local ONNX
+Default wake phrase is `hey rhasspy`, using OpenWakeWord's official local ONNX
 model. Change `wake_word.pretrained` or `wake_word.model_paths` in `config.yaml`
 to use a different real ONNX wake model.
 

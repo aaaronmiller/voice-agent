@@ -12,7 +12,7 @@ Hands-free local voice assistant. Use `v2/` for the current best build.
 
 Current v2 stack:
 
-- Wake-word activation through OpenWakeWord `hey_jarvis`
+- Wake-word activation through OpenWakeWord `hey_rhasspy`
 - Local STT through Parakeet TDT v2 ONNX (`onnx-asr`)
 - Silero VAD silence detection and barge-in
 - Local TTS through Kokoro ONNX, with espeak-ng fallback
@@ -151,5 +151,5 @@ Important knobs in `config.yaml`:
 - `v2/test.sh` passes.
 - Parakeet v2 ONNX transcribed the local sample WAV:
   `Ask not what your country can do for you. Ask what you can do for your country.`
-- OpenWakeWord detector initializes successfully with the official `hey_jarvis`
+- OpenWakeWord detector initializes successfully with the official `hey_rhasspy`
   model in v2.

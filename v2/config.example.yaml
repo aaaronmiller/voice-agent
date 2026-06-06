@@ -1,6 +1,6 @@
 assistant:
   name: "Echo Node"
-  wake_phrase: "hey jarvis"
+  wake_phrase: "hey rhasspy"
   exit_phrases:
     - "quit"
     - "exit"
@@ -20,7 +20,7 @@ wake_word:
   enabled: true
   sensitivity: 0.35
   pretrained:
-    - hey_jarvis
+    - hey_rhasspy
   model_paths: []
 
 vad:

@@ -4,7 +4,7 @@
 
 ### Added
 - Added a lean local voice assistant MVP using Parakeet STT, OpenWakeWord wake detection, RMS silence detection, Ollama responses, and espeak-ng TTS.
-- Added Echo-Node v2 with Kokoro ONNX TTS, Silero VAD barge-in, OpenWakeWord `hey_jarvis`, and WSL2/Windows install scripts.
+- Added Echo-Node v2 with Kokoro ONNX TTS, Silero VAD barge-in, OpenWakeWord `hey_rhasspy`, and WSL2/Windows install scripts.
 - Added v2 configuration docs, Kokoro voice audition tooling, custom wake-word sample recording, terminal Enter hotkey triggering, and an Echo-Node installation/configuration skill.
 - Added Fedora 43/PipeWire install support, Hermes API-server integration, Odysseus `/api/v1/chat` integration, and a grounded council review document.
 - Added Fedora/GNOME and Windows hotkey launch installers for Echo-Node v2.
@@ -20,3 +20,5 @@
 - Changed Parakeet STT provider default back to CPU after local RTX 4050 benchmarking showed CUDA was slower for the current ONNX graph.
 - Updated v2 setup to accept any Python 3.11+ interpreter instead of requiring the exact `python3.11` command.
 - Replaced stale Hermes WebSocket integration notes with Hermes OpenAI-compatible API-server routing.
+- Routed v2 assistant replies through the streaming response path so speech can begin before the full backend answer is complete.
+- Aligned v2 wake-word docs, example config, and tests with the current `hey_rhasspy` detector.

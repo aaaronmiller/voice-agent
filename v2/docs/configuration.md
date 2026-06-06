@@ -67,14 +67,14 @@ and echoes unhandled text.
 
 ### Wake Word File
 
-The default uses OpenWakeWord's installed `hey_jarvis` ONNX model:
+The default uses OpenWakeWord's installed `hey_rhasspy` ONNX model:
 
 ```yaml
 wake_word:
   enabled: true
   sensitivity: 0.55
   pretrained:
-    - hey_jarvis
+    - hey_rhasspy
   model_paths: []
 ```
 
