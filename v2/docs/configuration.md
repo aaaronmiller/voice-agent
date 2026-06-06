@@ -263,6 +263,24 @@ hotkeys:
 
 Set `hotkeys.enabled: false` to disable manual triggering.
 
+Install system-wide hotkeys with the platform scripts:
+
+```bash
+# Fedora / GNOME
+./install-hotkey-fedora
+```
+
+```powershell
+# Native Windows after ./install-windows.ps1
+.\install-hotkey-windows.ps1
+```
+
+Default binding is `Ctrl+Alt+V`. Override it with `ECHO_NODE_HOTKEY`:
+
+```bash
+ECHO_NODE_HOTKEY='<Super>space' ./install-hotkey-fedora
+```
+
 ### Custom Wake-Word Recording
 
 Record positive samples:
