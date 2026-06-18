@@ -9,12 +9,31 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from pathlib import Path
+
+# Load .env — try project root first, then v2/ directory
+_script_dir = Path(__file__).resolve().parent
+_dotenv_path = _script_dir.parent / ".env"
+for _candidate in [_script_dir.parent / ".env", _script_dir.parent.parent / ".env"]:
+    if _candidate.exists():
+        _dotenv_path = _candidate
+        break
+if _dotenv_path.exists():
+    for _line in _dotenv_path.read_text().splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key, _val = _line.split("=", 1)
+        _key = _key.strip()
+        _val = _val.strip().strip("'\"")
+        if _key and not os.environ.get(_key):
+            os.environ[_key] = _val
+
 import shutil
 import subprocess
-import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
