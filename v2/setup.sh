@@ -41,7 +41,7 @@ python -m pip install -r requirements.txt
 python - <<'PY'
 from openwakeword.utils import download_models
 
-download_models(model_names=["hey_jarvis"])
+download_models(model_names=["hey_rhasspy"])
 PY
 
 mkdir -p models/kokoro

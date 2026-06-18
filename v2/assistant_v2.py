@@ -278,6 +278,37 @@ class Recorder:
         return path
 
 
+class FasterWhisperSTT:
+    """STT via faster-whisper (CTranslate2, 5x faster than Parakeet)."""
+    def __init__(self, config: dict[str, Any]):
+        self.model_size = str(config.get("model", "tiny"))
+        self.device = str(config.get("device", "cpu"))
+        self.compute_type = str(config.get("compute_type", "int8"))
+        self._model = None
+
+    def load(self) -> None:
+        if self._model is not None:
+            return
+        from faster_whisper import WhisperModel
+        started = time.perf_counter()
+        print(f"[stt] loading faster-whisper {self.model_size} ({self.device}, {self.compute_type})", flush=True)
+        self._model = WhisperModel(
+            self.model_size,
+            device=self.device,
+            compute_type=self.compute_type,
+        )
+        print(f"[timing] stt_load={time.perf_counter() - started:.2f}s", flush=True)
+
+    def transcribe(self, wav_path: Path) -> str:
+        self.load()
+        assert self._model is not None
+        started = time.perf_counter()
+        segments, info = self._model.transcribe(str(wav_path), language="en")
+        text = " ".join(s.text.strip() for s in segments).strip()
+        print(f"[timing] stt={time.perf_counter() - started:.2f}s", flush=True)
+        return text
+
+
 class ParakeetSTT:
     def __init__(self, config: dict[str, Any]):
         self.model_name = str(config.get("model_name", "nemo-parakeet-tdt-0.6b-v2"))
@@ -345,6 +376,28 @@ class KokoroTTS:
         return path
 
 
+class DotsTTS:
+    """GPU-accelerated TTS via dots.tts (2B AR model, MeanFlow distillation)."""
+    def __init__(self, config: dict[str, Any]):
+        from tts_dots import DotsTTS as _DotsTTS
+        self._impl = _DotsTTS(config)
+
+    def load(self) -> None:
+        self._impl.load()
+
+    def warm(self) -> None:
+        self._impl.warm()
+
+    def synthesize_to_wav(self, text: str, path: Path) -> Path:
+        started = time.perf_counter()
+        result = self._impl.synthesize_to_wav(text, path)
+        print(f"[timing] tts_gen={time.perf_counter() - started:.2f}s provider=dots", flush=True)
+        return result
+
+    def generate_stream(self, text: str):
+        return self._impl.generate_stream(text)
+
+
 class EspeakTTS:
     def __init__(self, config: dict[str, Any]):
         self.voice = str(config.get("espeak_voice", "en-us"))
@@ -380,11 +433,17 @@ class InterruptibleSpeaker:
         self.min_playback_age_seconds = float(config.get("min_playback_age_seconds", 0.45))
         self.avatar = avatar
         try:
-            self.tts = KokoroTTS(tts_config) if tts_config.get("provider", "kokoro") == "kokoro" else EspeakTTS(tts_config)
-            if isinstance(self.tts, KokoroTTS):
+            provider = tts_config.get("provider", "kokoro")
+            if provider == "dots":
+                self.tts = DotsTTS(tts_config)
+            elif provider == "kokoro":
+                self.tts = KokoroTTS(tts_config)
+            else:
+                self.tts = EspeakTTS(tts_config)
+            if provider in ("kokoro", "dots"):
                 self.tts.load()
         except Exception as exc:
-            print(f"[tts] Kokoro unavailable, falling back to espeak-ng: {exc}", flush=True)
+            print(f"[tts] {tts_config.get('provider', 'kokoro')} unavailable, falling back to espeak-ng: {exc}", flush=True)
             self.tts = EspeakTTS(tts_config)
 
     def warm(self) -> None:
@@ -810,7 +869,12 @@ class Assistant:
         self.wake = WakeDetector(config.get("wake_word", {}))
         self.vad = SileroVad(config.get("vad", {}))
         self.recorder = Recorder(self.mic, self.vad, config.get("vad", {}))
-        self.stt = ParakeetSTT(config.get("stt", {}))
+        stt_cfg = config.get("stt", {})
+        stt_provider = stt_cfg.get("provider", "parakeet")
+        if stt_provider == "faster-whisper":
+            self.stt = FasterWhisperSTT(stt_cfg)
+        else:
+            self.stt = ParakeetSTT(stt_cfg)
         try:
             from avatar import build as build_avatar  # local import keeps PyQt6 optional
             self.avatar = build_avatar(config.get("avatar", {}))
@@ -826,7 +890,14 @@ class Assistant:
         )
         assistant_cfg = config.get("assistant", {})
         self.exit_phrases = {str(p).lower() for p in assistant_cfg.get("exit_phrases", [])}
+        # Smart router: classify query → route to best agent
+        from echo_node.agent_profiles import get_all_agents, SmartRouter
+        self._all_agents = get_all_agents()
+        self.router = SmartRouter(self._all_agents, default="fast")
+        # Legacy LLM for backward compat
         self.llm = LLMRouter(config.get("llm", {}), str(assistant_cfg.get("system_prompt", "")))
+        agent_cfg = config.get("llm_agent", {})
+        self.llm_agent = LLMRouter(agent_cfg, str(assistant_cfg.get("system_prompt", ""))) if agent_cfg else None
         self.hotkey = TerminalHotkey(config.get("hotkeys", {}))
         self.performance = config.get("performance", {})
         self.stop = False
@@ -878,13 +949,17 @@ class Assistant:
             self.speaker.speak("Stopping.", None)
             self.stop = True
             return
-        chunks, should_remember = self.llm.response_chunks(text)
-        print("[assistant] ", end="", flush=True)
-        interrupted, answer = self.speaker.speak_stream(chunks, self.mic)
-        print(flush=True)
-        if should_remember:
-            self.llm.remember_response(text, answer)
-        print(f"[timing] turn_total={time.perf_counter() - turn_started:.2f}s", flush=True)
+
+        # Route through smart classifier → best agent
+        route_key = self.router.classify(text)
+        print(f"[router] {route_key} → {self.router.agents[route_key].name}", flush=True)
+        system = self.config.get("assistant", {}).get("system_prompt", "")
+        result = self.router.route(text, system)
+
+        answer = result.text
+        print(f"[assistant/{route_key}] {answer}", flush=True)
+        interrupted = self.speaker.speak(answer, self.mic)
+        print(f"[timing] turn_total={time.perf_counter() - turn_started:.2f}s route={route_key} cost=${result.cost.call_usd:.4f}", flush=True)
         if interrupted:
             self._handle_turn()
 
