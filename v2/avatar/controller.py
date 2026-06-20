@@ -148,7 +148,7 @@ class AvatarController:
         sf.write(tmp, data, sr, subtype="PCM_16")
         return Path(tmp)
 
-    def preload(self, wav_path: Path) -> bool:
+    def preload(self, wav_path: Path, offset_seconds: float = 0.0) -> bool:
         """Run Rhubarb on ``wav_path`` and buffer the resulting cue list.
         Returns True when cues are queued and play() will animate; False on
         any failure (caller proceeds with audio anyway).
@@ -177,6 +177,8 @@ class AvatarController:
                 return False
             with self._lock:
                 self._pending = {"cmd": "play", "cues": cues, "duration": duration}
+                if offset_seconds > 0:
+                    self._pending["start_offset"] = float(offset_seconds)
             return True
         except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
             return False

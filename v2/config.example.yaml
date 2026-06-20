@@ -41,6 +41,7 @@ barge_in:
 hotkeys:
   enabled: true
   terminal_enter: true
+  escape_toggle: true
 
 performance:
   preload_stt: true
@@ -72,6 +73,24 @@ tts:
   espeak_voice: en-us
   espeak_speed: 165
   espeak_pitch: 45
+
+# Speech formatting — truncates long replies, summarizes tables, strips markdown.
+# Say "be verbose" to get full replies, "be concise" to reset.
+speech_format:
+  max_sentences: 4
+  verbose: false
+
+# Hermes native integration — direct tool access via local API server.
+hermes:
+  base_url: http://127.0.0.1:8642/v1
+  model: hermes-agent
+  api_key: ""         # or set HERMES_API_KEY env var
+  timeout_seconds: 90
+
+# Pi agent native integration — runs pi as subprocess.
+pi_agent:
+  command: ["pi", "-p"]
+  timeout_seconds: 120
 
 # Floating animated avatar (bottom-right of primary screen) lip-synced to the TTS WAV.
 # Requires PyQt6 in the v2 venv and the Rhubarb Lip Sync binary at

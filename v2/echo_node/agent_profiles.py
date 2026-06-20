@@ -302,7 +302,8 @@ class SmartRouter:
         self.agents = agents
         self.default = default
         self.last_agent: str | None = None
-        self.cost = CostTracker()
+        self.cost = CostTracker()  # persistent across calls
+        self._call_costs: list[dict] = []
 
     def classify(self, text: str) -> str:
         """Determine which agent should handle this query."""
@@ -347,7 +348,20 @@ class SmartRouter:
             return AgentResult("No agent available", 0, self.cost, "none", "none", success=False)
 
         self.last_agent = agent_key
-        return agent.respond(text, system, self.cost)
+        # Create a per-call cost tracker so session_total accumulates
+        call_cost = CostTracker()
+        result = agent.respond(text, system, call_cost)
+        self.cost.session_usd += call_cost.call_usd
+        self.cost.call_usd = call_cost.call_usd
+        self.cost.prompt_tokens += call_cost.prompt_tokens
+        self.cost.completion_tokens += call_cost.completion_tokens
+        self._call_costs.append({
+            "agent": agent_key,
+            "model": agent.model_name,
+            "cost_usd": call_cost.call_usd,
+            "elapsed": result.elapsed,
+        })
+        return result
 
     def print_status(self) -> str:
         return (

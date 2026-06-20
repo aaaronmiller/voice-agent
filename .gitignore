@@ -22,7 +22,6 @@ wakeword_samples/
 *.mp3
 
 node_modules/
-gateway/node_modules/
 
 *.log
 *.pid
@@ -34,4 +33,3 @@ gateway/node_modules/
 *.zip
 *.tar
 *.tar.gz
-
