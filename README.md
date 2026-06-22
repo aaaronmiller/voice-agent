@@ -8,6 +8,14 @@
 
 # Echo-Node Local Voice Assistant
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/STT-Parakeet%20TDT-0ea5e9?style=flat-square" alt="STT">
+  <img src="https://img.shields.io/badge/TTS-Kokoro%20ONNX-8b5cf6?style=flat-square" alt="TTS">
+  <img src="https://img.shields.io/badge/Wake%20Word-OpenWakeWord-f59e0b?style=flat-square" alt="Wake word">
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT">
+</p>
+
 Hands-free local voice assistant with wake-word activation, local STT/TTS, and
 flexible backend routing. Optimized for Surface Laptop Studio 2 / RTX 4050-class
 hardware.
