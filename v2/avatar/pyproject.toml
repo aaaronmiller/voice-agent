@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "echo-node-avatar"
+version = "2.1.0"
+description = "Floating PyQt6 avatar with lip-sync, animated visemes, and customizable frame styles"
+authors = [
+    {name = "Aaron Miller", email = "miller@hey.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.5",
+    "PyYAML>=6.0",
+    "soundfile>=0.12",
+    "numpy>=1.24",
+]
+
+[project.scripts]
+avatar-window = "avatar.window:main"
+avatar-preprocess = "avatar.preprocess:main"
+
+[project.entry-points."echo_node_avatars"]
+raccoon-hacker = "avatar:build_controller"
+owl-wizard = "avatar:build_controller"
+axolotl-astronaut = "avatar:build_controller"
+axolotl-helmet = "avatar:build_controller"
+raccoon-cyber = "avatar:build_controller"
+
+[tool.setuptools.packages.find]
+include = ["avatar*"]

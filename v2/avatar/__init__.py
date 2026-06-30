@@ -13,5 +13,18 @@ controller  -- in-process driver: spawns the sidecar, runs Rhubarb on each
 """
 
 from .controller import AvatarController, NullAvatar, build  # noqa: F401
+from .window import main as window_main  # noqa: F401
+from .preprocess import main as preprocess_main  # noqa: F401
 
-__all__ = ["AvatarController", "NullAvatar", "build", "controller", "preprocess", "window"]
+
+def build_controller(config: dict) -> AvatarController | NullAvatar:
+    """Shorthand for `avatar.build()` — returns a configured controller."""
+    return build(config)
+
+
+__all__ = [
+    "AvatarController", "NullAvatar", "build", "build_controller",
+    "controller", "preprocess", "window",
+    "window_main", "preprocess_main",
+]
+

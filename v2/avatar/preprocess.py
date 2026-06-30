@@ -189,6 +189,12 @@ def build_character(name: str, spec: dict, base: Path) -> None:
     )
 
 
+def main() -> None:
+    """CLI entry point. Run without args to build all characters."""
+    args = sys.argv[1:]
+    build_all(args if args else None)
+
+
 def build_all(only: Iterable[str] | None = None) -> None:
     base = Path(__file__).resolve().parent
     manifest = yaml.safe_load((base / "characters.yaml").read_text())
@@ -200,5 +206,4 @@ def build_all(only: Iterable[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    build_all(args if args else None)
+    main()

@@ -1,0 +1,75 @@
+# Avatar theme presets
+# Copy one of these into your config.yaml under avatar.frame_style, or
+# pass the keys at runtime via set_frame_style().
+#
+# Usage:
+#   avatar:
+#     frame_style:
+#       shape: circle
+#       color: cyberpunk
+#       opacity: 0.6
+#       border_width: 2.0
+
+themes:
+  # ── Original night-blue ──
+  default:
+    shape: rounded
+    color: blue
+    opacity: 0.55
+    border_width: 1.5
+
+  # ── Clean minimal ──
+  minimal:
+    shape: square
+    color: white
+    opacity: 0.30
+    border_width: 0.5
+
+  # ── Dark glass ──
+  glass:
+    shape: rounded
+    color: cyan
+    opacity: 0.20
+    border_width: 0.5
+
+  # ── Bold game streamer ──
+  neon:
+    shape: rounded
+    color: purple
+    opacity: 0.65
+    border_width: 2.5
+
+  # ── Warm friendly ──
+  warm:
+    shape: rounded
+    color: amber
+    opacity: 0.50
+    border_width: 1.5
+
+  # ── High contrast ──
+  high-contrast:
+    shape: square
+    color: green
+    opacity: 0.75
+    border_width: 3.0
+
+  # ── Soft pastel ──
+  pastel:
+    shape: rounded
+    color: pink
+    opacity: 0.35
+    border_width: 1.0
+
+  # ── Cyberpunk ──
+  cyberpunk:
+    shape: circle
+    color: cyan
+    opacity: 0.60
+    border_width: 2.5
+
+  # ── Alert / urgent ──
+  alert:
+    shape: circle
+    color: red
+    opacity: 0.70
+    border_width: 3.0
