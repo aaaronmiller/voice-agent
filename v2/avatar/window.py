@@ -4,15 +4,14 @@ clear of the assistant's audio/STT loops.
 Protocol (line-delimited JSON on stdin, one object per line):
 
     {"cmd":"set_character", "name":"raccoon-hacker"}
-    {"cmd":"play", "cues":[{"start":0.0,"end":0.06,"value":"B"}, ...], "duration":2.6}
+    {"cmd":"set_frame_style", "shape":"rounded", "color":"blue", "opacity":0.4, "border_width":2}
+    {"cmd":"set_volume", "value":0.8}
+    {"cmd":"play", "cues":[...], "duration":2.6}
     {"cmd":"stop"}
-    {"cmd":"show"}
-    {"cmd":"hide"}
     {"cmd":"quit"}
 
-Run directly for a quick preview:
-
-    .venv/bin/python -m v2.avatar.window --character raccoon-hacker --demo
+Settings changes are echoed back on stdout as JSON so the controller can
+forward them to the assistant.
 """
 
 from __future__ import annotations
@@ -23,25 +22,19 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import yaml
 from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import (
-    QAction,
-    QFont,
-    QGuiApplication,
-    QIcon,
-    QPainter,
-    QPixmap,
-)
+from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -49,41 +42,111 @@ from PyQt6.QtWidgets import (
 )
 
 VISEMES: tuple[str, ...] = ("X", "A", "B", "C", "D", "E", "F", "G", "H")
-DEFAULT_SIZE = 220         # max edge in px on screen
-MARGIN = 16                # distance from screen corner
-FRAME_PADDING = 48         # extra pixels for the border/controls around the avatar
+DEFAULT_SIZE = 220
+MARGIN = 16
 IDLE_BLINK_PERIOD_S = 4.5
 
-# ── Colours ─────────────────────────────────────────────────────────
+# ── Default frame style ─────────────────────────────────────────────
 
-FRAME_BG = "rgba(10, 10, 20, 0.60)"
-FRAME_BORDER = "rgba(100, 180, 255, 0.30)"
-BTN_BG = "rgba(60, 60, 90, 0.70)"
-BTN_HOVER = "rgba(100, 180, 255, 0.40)"
-BTN_STYLE = f"""
-    QPushButton {{
-        background: {BTN_BG};
+FRAME_PRESETS: dict[str, dict[str, Any]] = {
+    "blue":  {"bg": "rgba(10,10,30,{opacity})",  "border": "rgba(80,160,255,{alpha})",  "glow": "rgba(80,160,255,0.08)"},
+    "green": {"bg": "rgba(10,30,10,{opacity})",  "border": "rgba(80,220,120,{alpha})",  "glow": "rgba(80,220,120,0.08)"},
+    "purple":{"bg": "rgba(25,10,35,{opacity})",  "border": "rgba(180,80,255,{alpha})",  "glow": "rgba(180,80,255,0.08)"},
+    "amber": {"bg": "rgba(30,20,5,{opacity})",   "border": "rgba(255,180,40,{alpha})", "glow": "rgba(255,180,40,0.08)"},
+    "red":   {"bg": "rgba(35,10,10,{opacity})",  "border": "rgba(255,80,80,{alpha})",   "glow": "rgba(255,80,80,0.08)"},
+    "cyan":  {"bg": "rgba(5,25,30,{opacity})",   "border": "rgba(40,220,255,{alpha})",  "glow": "rgba(40,220,255,0.08)"},
+    "pink":  {"bg": "rgba(30,10,25,{opacity})",  "border": "rgba(255,100,180,{alpha})", "glow": "rgba(255,100,180,0.08)"},
+    "white": {"bg": "rgba(20,20,30,{opacity})",  "border": "rgba(200,220,255,{alpha})",  "glow": "rgba(200,220,255,0.08)"},
+}
+
+SHAPES = ["square", "rounded", "circle"]
+DEFAULT_SHAPE = "rounded"
+DEFAULT_COLOR = "blue"
+DEFAULT_OPACITY = 0.55
+DEFAULT_BORDER_WIDTH = 1.5
+
+BTN_STYLE = """
+    QPushButton {
+        background: rgba(60,60,90,0.70);
         color: #ccd;
-        border: 1px solid {FRAME_BORDER};
+        border: 1px solid rgba(100,180,255,0.30);
         border-radius: 10px;
         padding: 2px 6px;
         font-size: 11px;
         font-weight: bold;
         min-width: 22px;
         min-height: 22px;
-    }}
-    QPushButton:hover {{
-        background: {BTN_HOVER};
-        border: 1px solid rgba(150, 200, 255, 0.6);
-    }}
+    }
+    QPushButton:hover {
+        background: rgba(100,180,255,0.40);
+        border: 1px solid rgba(150,200,255,0.6);
+    }
+    QPushButton:checked {
+        background: rgba(100,180,255,0.35);
+        border: 1.5px solid rgba(100,180,255,0.7);
+    }
+"""
+
+POPUP_STYLE = """
+    QFrame#settingsFrame {
+        background: rgba(15,15,35,0.92);
+        border: 1px solid rgba(100,160,255,0.25);
+        border-radius: 14px;
+    }
+    QLabel {
+        color: #cce;
+        font-size: 10px;
+        font-weight: bold;
+    }
+    QLabel#title {
+        font-size: 13px;
+        color: #eef;
+    }
+    QLabel#value {
+        font-size: 10px;
+        color: #99b;
+        min-width: 30px;
+    }
+    QComboBox {
+        background: rgba(40,40,70,0.80);
+        color: #dde;
+        border: 1px solid rgba(100,180,255,0.25);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 10px;
+        min-width: 90px;
+    }
+    QComboBox::drop-down { border: none; }
+    QComboBox QAbstractItemView {
+        background: rgba(20,20,45,0.96);
+        color: #dde;
+        selection-background-color: rgba(100,180,255,0.25);
+        border: 1px solid rgba(100,180,255,0.2);
+        border-radius: 4px;
+        outline: none;
+    }
+    QSlider::groove:horizontal {
+        height: 3px;
+        background: rgba(60,60,100,0.5);
+        border-radius: 2px;
+    }
+    QSlider::handle:horizontal {
+        background: rgba(100,180,255,0.80);
+        width: 10px;
+        height: 10px;
+        margin: -3px 0;
+        border-radius: 5px;
+    }
+    QSlider::sub-page:horizontal {
+        background: rgba(100,180,255,0.30);
+        border-radius: 2px;
+    }
 """
 
 
 # ── Stdin reader thread ─────────────────────────────────────────────
 
 class StdinReader(QThread):
-    """Reads line-JSON commands from stdin and emits them on the Qt thread."""
-
     command = pyqtSignal(dict)
 
     def run(self) -> None:
@@ -99,116 +162,277 @@ class StdinReader(QThread):
                 self.command.emit(payload)
 
 
+# ── Color swatch button ─────────────────────────────────────────────
+
+class ColorButton(QPushButton):
+    def __init__(self, color_name: str, preset: dict, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.color_name = color_name
+        self.preset = preset
+        self.setCheckable(True)
+        self.setFixedSize(22, 22)
+        border_color = preset["border"].format(alpha=1.0, opacity=1.0)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: {preset["bg"].format(opacity=0.7)};
+                border: 2px solid {border_color};
+                border-radius: 11px;
+            }}
+            QPushButton:hover {{
+                border: 2px solid white;
+            }}
+            QPushButton:checked {{
+                border: 2.5px solid white;
+                background: {preset["bg"].format(opacity=0.9)};
+            }}
+        """)
+
+
 # ── Settings popup ───────────────────────────────────────────────────
 
 class SettingsPopup(QFrame):
-    """Floating settings panel for avatar selection and size."""
+    """Floating settings panel with knobs for everything."""
 
-    def __init__(self, parent: QWidget, character_list: list[str], current: str):
+    # Signals to send changes back to the host process
+    setting_changed = pyqtSignal(dict)
+
+    def __init__(self, parent: QWidget, character_list: list[str], current_char: str,
+                 frame_state: dict[str, Any]):
         super().__init__(parent)
+        self.setObjectName("settingsFrame")
         self.setWindowFlags(
             Qt.WindowType.Popup
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: {FRAME_BG};
-                border: 1px solid {FRAME_BORDER};
-                border-radius: 12px;
-                padding: 8px;
-            }}
-            QLabel {{
-                color: #dde;
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QComboBox {{
-                background: {BTN_BG};
-                color: #dde;
-                border: 1px solid {FRAME_BORDER};
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 11px;
-                min-width: 120px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background: rgba(20, 20, 40, 0.95);
-                color: #dde;
-                selection-background-color: rgba(100, 180, 255, 0.3);
-                border: 1px solid {FRAME_BORDER};
-                border-radius: 4px;
-            }}
-            QSlider::groove:horizontal {{
-                height: 4px;
-                background: rgba(100, 100, 140, 0.5);
-                border-radius: 2px;
-            }}
-            QSlider::handle:horizontal {{
-                background: rgba(100, 180, 255, 0.8);
-                width: 12px;
-                height: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
-            }}
-        """)
+        self.setStyleSheet(POPUP_STYLE)
+
+        self.frame_state = dict(frame_state)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
 
-        title = QLabel("⚙ Avatar Settings")
-        title.setStyleSheet("font-size: 13px; font-weight: bold; color: #eef;")
+        # ── Title ──
+        title = QLabel("⚙ Avatar")
+        title.setObjectName("title")
         layout.addWidget(title)
 
-        # Character selector
-        char_layout = QHBoxLayout()
-        char_label = QLabel("Character:")
-        char_layout.addWidget(char_label)
+        # ── Row: Character + Shape ──
+        row1 = QHBoxLayout()
+        row1.setSpacing(10)
 
+        cc = QVBoxLayout()
+        cc.addWidget(QLabel("Character"))
         self.combo = QComboBox()
         self.combo.addItems(character_list)
-        self.combo.setCurrentText(current)
-        self.combo.currentTextChanged.connect(self._on_char_changed)
-        char_layout.addWidget(self.combo)
-        layout.addLayout(char_layout)
+        self.combo.setCurrentText(current_char)
+        self.combo.currentTextChanged.connect(lambda n: self._emit("set_character", name=n))
+        cc.addWidget(self.combo)
+        row1.addLayout(cc)
 
-        # Size slider
-        size_layout = QHBoxLayout()
-        size_label = QLabel("Size:")
-        size_layout.addWidget(size_label)
+        ss = QVBoxLayout()
+        ss.addWidget(QLabel("Shape"))
+        self.shape_combo = QComboBox()
+        self.shape_combo.addItems(SHAPES)
+        self.shape_combo.setCurrentText(frame_state.get("shape", DEFAULT_SHAPE))
+        self.shape_combo.currentTextChanged.connect(self._on_shape)
+        ss.addWidget(self.shape_combo)
+        row1.addLayout(ss)
+        layout.addLayout(row1)
 
+        # ── Color swatches ──
+        layout.addWidget(QLabel("Color"))
+        color_grid = QHBoxLayout()
+        color_grid.setSpacing(4)
+        self.color_btns: dict[str, ColorButton] = {}
+        self._color_group: list[ColorButton] = []
+        for cname in FRAME_PRESETS:
+            btn = ColorButton(cname, FRAME_PRESETS[cname])
+            btn.clicked.connect(lambda _, n=cname: self._on_color(n))
+            self.color_btns[cname] = btn
+            self._color_group.append(btn)
+            color_grid.addWidget(btn)
+        color_grid.addStretch()
+        layout.addLayout(color_grid)
+
+        # ── Sliders row 1: Opacity + Border ──
+        row3 = QHBoxLayout()
+        row3.setSpacing(12)
+
+        # Opacity
+        op_v = QVBoxLayout()
+        op_h = QHBoxLayout()
+        op_lbl = QLabel("BG")
+        op_h.addWidget(op_lbl)
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(5, 95)
+        self.opacity_slider.setValue(int(frame_state.get("opacity", DEFAULT_OPACITY) * 100))
+        self.opacity_slider.valueChanged.connect(self._on_opacity)
+        op_h.addWidget(self.opacity_slider)
+        self.opacity_val = QLabel(f'{self.opacity_slider.value()}%')
+        self.opacity_val.setObjectName("value")
+        op_h.addWidget(self.opacity_val)
+        op_v.addLayout(op_h)
+        row3.addLayout(op_v)
+
+        # Border width
+        bw_v = QVBoxLayout()
+        bw_h = QHBoxLayout()
+        bw_lbl = QLabel("Edge")
+        bw_h.addWidget(bw_lbl)
+        self.border_slider = QSlider(Qt.Orientation.Horizontal)
+        self.border_slider.setRange(0, 20)
+        self.border_slider.setValue(int(frame_state.get("border_width", DEFAULT_BORDER_WIDTH) * 2))
+        self.border_slider.valueChanged.connect(self._on_border)
+        bw_h.addWidget(self.border_slider)
+        self.border_val = QLabel(f'{self.border_slider.value() // 2}.{self.border_slider.value() % 2 * 5}px')
+        self.border_val.setObjectName("value")
+        bw_h.addWidget(self.border_val)
+        bw_v.addLayout(bw_h)
+        row3.addLayout(bw_v)
+        layout.addLayout(row3)
+
+        # ── Separator ──
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: rgba(100,180,255,0.10);")
+        layout.addWidget(sep)
+
+        # ── Sliders row 2: Size + Volume ──
+        row4 = QHBoxLayout()
+        row4.setSpacing(12)
+
+        # Size
+        sz_v = QVBoxLayout()
+        sz_h = QHBoxLayout()
+        sz_lbl = QLabel("Size")
+        sz_h.addWidget(sz_lbl)
         self.size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.size_slider.setRange(120, 400)
-        self.size_slider.setValue(DEFAULT_SIZE)
-        self.size_slider.valueChanged.connect(self._on_size_changed)
-        size_layout.addWidget(self.size_slider)
+        self.size_slider.setRange(100, 400)
+        self.size_slider.setValue(parent._avatar_size if hasattr(parent, '_avatar_size') else DEFAULT_SIZE)
+        self.size_slider.valueChanged.connect(self._on_size)
+        sz_h.addWidget(self.size_slider)
+        self.size_val = QLabel(f'{self.size_slider.value()}px')
+        self.size_val.setObjectName("value")
+        sz_h.addWidget(self.size_val)
+        sz_v.addLayout(sz_h)
+        row4.addLayout(sz_v)
 
-        self.size_label = QLabel(f"{DEFAULT_SIZE}px")
-        self.size_label.setStyleSheet("font-size: 10px; color: #aab; min-width: 35px;")
-        size_layout.addWidget(self.size_label)
-        layout.addLayout(size_layout)
+        # Volume
+        vl_v = QVBoxLayout()
+        vl_h = QHBoxLayout()
+        vl_lbl = QLabel("Vol")
+        vl_h.addWidget(vl_lbl)
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setValue(80)
+        self.vol_slider.valueChanged.connect(lambda v: (self.vol_val.setText(f'{v}%'), self._emit("set_volume", value=v/100)))
+        vl_h.addWidget(self.vol_slider)
+        self.vol_val = QLabel('80%')
+        self.vol_val.setObjectName("value")
+        vl_h.addWidget(self.vol_val)
+        vl_v.addLayout(vl_h)
+        row4.addLayout(vl_v)
+        layout.addLayout(row4)
+
+        # ── Sliders row 3: Silence + Blink ──
+        row5 = QHBoxLayout()
+        row5.setSpacing(12)
+
+        # Silence threshold
+        si_v = QVBoxLayout()
+        si_h = QHBoxLayout()
+        si_lbl = QLabel("Mic")
+        si_h.addWidget(si_lbl)
+        self.silence_slider = QSlider(Qt.Orientation.Horizontal)
+        self.silence_slider.setRange(1, 20)
+        self.silence_slider.setValue(4)
+        self.silence_slider.valueChanged.connect(lambda v: (self.silence_val.setText(f'{v/10:.1f}s'), self._emit("set_silence_seconds", value=v/10)))
+        si_h.addWidget(self.silence_slider)
+        self.silence_val = QLabel('0.4s')
+        self.silence_val.setObjectName("value")
+        si_h.addWidget(self.silence_val)
+        si_v.addLayout(si_h)
+        row5.addLayout(si_v)
+
+        # Blink interval
+        bl_v = QVBoxLayout()
+        bl_h = QHBoxLayout()
+        bl_lbl = QLabel("Blink")
+        bl_h.addWidget(bl_lbl)
+        self.blink_slider = QSlider(Qt.Orientation.Horizontal)
+        self.blink_slider.setRange(10, 100)
+        self.blink_slider.setValue(45)
+        self.blink_slider.valueChanged.connect(lambda v: (self.blink_val.setText(f'{v/10:.1f}s'), self._emit("set_blink_interval", value=v/10)))
+        bl_h.addWidget(self.blink_slider)
+        self.blink_val = QLabel('4.5s')
+        self.blink_val.setObjectName("value")
+        bl_h.addWidget(self.blink_val)
+        bl_v.addLayout(bl_h)
+        row5.addLayout(bl_v)
+        layout.addLayout(row5)
 
         self.setLayout(layout)
         self.adjustSize()
 
-    def _on_char_changed(self, name: str) -> None:
-        parent = self.parent()
-        if hasattr(parent, 'set_character'):
-            parent.set_character(name)
+    # -- helpers -------------------------------------------------------------
 
-    def _on_size_changed(self, value: int) -> None:
-        self.size_label.setText(f"{value}px")
-        parent = self.parent()
-        if hasattr(parent, 'resize_avatar'):
-            parent.resize_avatar(value)
+    def _emit(self, cmd: str, **kw: Any) -> None:
+        payload = {"cmd": cmd, **kw}
+        self.setting_changed.emit(payload)
+        # Also send to stdout so the controller can pick it up
+        print(json.dumps(payload), flush=True)
+
+    def _on_shape(self, shape: str) -> None:
+        self.frame_state["shape"] = shape
+        self._emit("set_frame_style", **self.frame_state)
+
+    def _on_color(self, name: str) -> None:
+        self.frame_state["color"] = name
+        for btn in self._color_group:
+            btn.setChecked(btn.color_name == name)
+        self._emit("set_frame_style", **self.frame_state)
+
+    def _on_opacity(self, val: int) -> None:
+        self.opacity_val.setText(f'{val}%')
+        self.frame_state["opacity"] = val / 100
+        self._emit("set_frame_style", **self.frame_state)
+
+    def _on_border(self, val: int) -> None:
+        px = val / 2
+        self.border_val.setText(f'{px:.1f}px')
+        self.frame_state["border_width"] = px
+        self._emit("set_frame_style", **self.frame_state)
+
+    def _on_size(self, val: int) -> None:
+        self.size_val.setText(f'{val}px')
+        self._emit("set_size", value=val)
+
+    def sync_frame_state(self, state: dict[str, Any]) -> None:
+        self.frame_state.update(state)
+        if "shape" in state:
+            self.shape_combo.blockSignals(True)
+            self.shape_combo.setCurrentText(state["shape"])
+            self.shape_combo.blockSignals(False)
+        if "color" in state:
+            for btn in self._color_group:
+                btn.setChecked(btn.color_name == state["color"])
+        if "opacity" in state:
+            self.opacity_slider.blockSignals(True)
+            self.opacity_slider.setValue(int(state["opacity"] * 100))
+            self.opacity_slider.blockSignals(False)
+            self.opacity_val.setText(f'{int(state["opacity"] * 100)}%')
+        if "border_width" in state:
+            v = int(state["border_width"] * 2)
+            self.border_slider.blockSignals(True)
+            self.border_slider.setValue(v)
+            self.border_slider.blockSignals(False)
+            self.border_val.setText(f'{state["border_width"]:.1f}px')
 
     def show_at(self, x: int, y: int) -> None:
-        self.move(x - self.width(), y - self.height())
+        self.move(max(0, x - self.width()), max(0, y - self.height()))
         self.show()
 
 
@@ -233,68 +457,66 @@ class AvatarWindow(QWidget):
         self.frames: dict[str, QPixmap] = {}
         self._avatar_size = DEFAULT_SIZE
 
-        # Root layout — holds the frame + inner content
+        # ── Frame style state ──
+        self._frame_shape = DEFAULT_SHAPE
+        self._frame_color = DEFAULT_COLOR
+        self._frame_opacity = DEFAULT_OPACITY
+        self._frame_border_width = DEFAULT_BORDER_WIDTH
+
+        # ── Blink ──
+        self._blink_interval = IDLE_BLINK_PERIOD_S
+
+        # Root styling
         self.setStyleSheet("background: transparent;")
 
-        # Outer widget with the frame styling
+        # Outer frame widget
         self.frame_widget = QFrame(self)
-        self.frame_widget.setStyleSheet(f"""
-            QFrame {{
-                background: {FRAME_BG};
-                border: 1.5px solid {FRAME_BORDER};
-                border-radius: 16px;
-            }}
-        """)
-        # Layout inside the frame
+        self._apply_frame_style()
+
+        # Layout inside frame
         frame_layout = QVBoxLayout(self.frame_widget)
-        frame_layout.setContentsMargins(6, 6, 6, 6)
+        frame_layout.setContentsMargins(8, 8, 8, 8)
         frame_layout.setSpacing(4)
 
-        # Avatar label
+        # Avatar sprite
         self.label = QLabel()
         self.label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.label.setStyleSheet("background: transparent;")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         frame_layout.addWidget(self.label, stretch=1)
 
-        # Control bar
+        # ── Control bar ──
         ctrl_layout = QHBoxLayout()
         ctrl_layout.setContentsMargins(2, 0, 2, 2)
         ctrl_layout.setSpacing(4)
 
-        # Character name label
         self.char_label = QLabel()
-        self.char_label.setStyleSheet("color: rgba(180, 200, 255, 0.6); font-size: 9px; font-weight: bold; padding: 0 4px;")
+        self.char_label.setStyleSheet("color: rgba(180,200,255,0.55); font-size: 9px; font-weight: bold; padding: 0 4px;")
         self.char_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         ctrl_layout.addWidget(self.char_label, stretch=1)
 
-        # Prev character button
         self.prev_btn = QPushButton("◀")
         self.prev_btn.setStyleSheet(BTN_STYLE)
         self.prev_btn.setToolTip("Previous character")
         self.prev_btn.clicked.connect(self._prev_character)
         ctrl_layout.addWidget(self.prev_btn)
 
-        # Next character button
         self.next_btn = QPushButton("▶")
         self.next_btn.setStyleSheet(BTN_STYLE)
         self.next_btn.setToolTip("Next character")
         self.next_btn.clicked.connect(self._next_character)
         ctrl_layout.addWidget(self.next_btn)
 
-        # Settings gear button
         self.settings_btn = QPushButton("⚙")
         self.settings_btn.setStyleSheet(BTN_STYLE)
         self.settings_btn.setToolTip("Settings")
-        self.settings_btn.clicked.connect(self._show_settings)
+        self.settings_btn.clicked.connect(self._toggle_settings)
         ctrl_layout.addWidget(self.settings_btn)
 
         frame_layout.addLayout(ctrl_layout)
 
-        # Calculate total size
-        total_size = self._avatar_size + FRAME_PADDING
-        self.resize(total_size, total_size)
-        self.frame_widget.resize(total_size, total_size)
+        # Total size calc
+        self._update_window_size()
 
         # Playback state
         self._cues: list[dict] = []
@@ -304,21 +526,76 @@ class AvatarWindow(QWidget):
         self._playing: bool = False
 
         self._tick = QTimer(self)
-        self._tick.setInterval(16)  # ~60 fps
+        self._tick.setInterval(16)
         self._tick.timeout.connect(self._on_tick)
 
         self._idle_blink = QTimer(self)
-        self._idle_blink.setInterval(int(IDLE_BLINK_PERIOD_S * 1000))
         self._idle_blink.timeout.connect(self._idle_blink_tick)
+        self._restart_idle_blink()
 
         # Settings popup
         self._settings_popup: SettingsPopup | None = None
 
         self.set_character(default_character)
         self._anchor_bottom_right()
-        self.setMouseTracking(True)
 
-    # -- positioning ---------------------------------------------------------
+    # -- frame styling -------------------------------------------------------
+
+    def _make_frame_css(self) -> str:
+        preset = FRAME_PRESETS.get(self._frame_color, FRAME_PRESETS["blue"])
+        bg = preset["bg"].format(opacity=self._frame_opacity)
+        border_c = preset["border"].format(alpha=0.35, opacity=self._frame_opacity)
+        glow = preset["glow"].format(opacity=self._frame_opacity, alpha=self._frame_opacity)
+
+        r = 0
+        if self._frame_shape == "rounded":
+            r = 18
+        elif self._frame_shape == "circle":
+            r = 999  # fully rounded = circle when square
+
+        bw = max(0.5, self._frame_border_width)
+        return f"""
+            QFrame {{
+                background: {bg};
+                border: {bw}px solid {border_c};
+                border-radius: {r}px;
+            }}
+        """
+
+    def _apply_frame_style(self) -> None:
+        self.frame_widget.setStyleSheet(self._make_frame_css())
+
+    def set_frame_style(self, **kw: Any) -> None:
+        changed = False
+        if "shape" in kw and kw["shape"] in SHAPES and kw["shape"] != self._frame_shape:
+            self._frame_shape = kw["shape"]
+            changed = True
+        if "color" in kw and kw["color"] in FRAME_PRESETS and kw["color"] != self._frame_color:
+            self._frame_color = kw["color"]
+            changed = True
+        if "opacity" in kw:
+            self._frame_opacity = max(0.05, min(1.0, float(kw["opacity"])))
+            changed = True
+        if "border_width" in kw:
+            self._frame_border_width = max(0, min(10, float(kw["border_width"])))
+            changed = True
+        if changed:
+            self._apply_frame_style()
+
+    def _frame_state_dict(self) -> dict[str, Any]:
+        return {
+            "shape": self._frame_shape,
+            "color": self._frame_color,
+            "opacity": self._frame_opacity,
+            "border_width": self._frame_border_width,
+        }
+
+    # -- window sizing -------------------------------------------------------
+
+    def _update_window_size(self) -> None:
+        total = self._avatar_size + 56
+        self.resize(total, total)
+        self.frame_widget.resize(total, total)
 
     def _anchor_bottom_right(self) -> None:
         screen = QGuiApplication.primaryScreen()
@@ -326,7 +603,7 @@ class AvatarWindow(QWidget):
             return
         geo = screen.availableGeometry()
         x = geo.x() + geo.width() - self.width() - MARGIN
-        y = geo.y() + geo.height() - self.height() - MARGIN - 40  # offset for taskbar
+        y = geo.y() + geo.height() - self.height() - MARGIN - 40
         self.move(x, y)
 
     # -- character navigation ------------------------------------------------
@@ -345,13 +622,36 @@ class AvatarWindow(QWidget):
         idx = (idx + 1) % len(self.character_list)
         self.set_character(self.character_list[idx])
 
-    def _show_settings(self) -> None:
+    # -- settings popup ------------------------------------------------------
+
+    def _toggle_settings(self) -> None:
         if self._settings_popup and self._settings_popup.isVisible():
             self._settings_popup.close()
             return
         button_pos = self.settings_btn.mapToGlobal(self.settings_btn.rect().topLeft())
-        self._settings_popup = SettingsPopup(self, self.character_list, self.character)
+        self._settings_popup = SettingsPopup(
+            self, self.character_list, self.character, self._frame_state_dict()
+        )
+        self._settings_popup.setting_changed.connect(self._on_setting_change)
         self._settings_popup.show_at(button_pos.x(), button_pos.y())
+
+    def _on_setting_change(self, payload: dict) -> None:
+        cmd = payload.get("cmd")
+        if cmd == "set_character":
+            self.set_character(payload.get("name", ""))
+        elif cmd == "set_frame_style":
+            self.set_frame_style(**{k: v for k, v in payload.items() if k != "cmd"})
+        elif cmd == "set_size":
+            self.resize_avatar(int(payload.get("value", DEFAULT_SIZE)))
+        elif cmd == "set_blink_interval":
+            self._blink_interval = float(payload.get("value", IDLE_BLINK_PERIOD_S))
+            self._restart_idle_blink()
+
+    def _restart_idle_blink(self) -> None:
+        self._idle_blink.stop()
+        if self._blink_interval > 0:
+            self._idle_blink.setInterval(int(self._blink_interval * 1000))
+            self._idle_blink.start()
 
     # -- character loading ---------------------------------------------------
 
@@ -366,14 +666,12 @@ class AvatarWindow(QWidget):
         for viseme in VISEMES:
             path = char_dir / f"{viseme}.png"
             if not path.exists():
-                print(f"[avatar-window] missing frame {path}", file=sys.stderr, flush=True)
                 continue
             pix = QPixmap(str(path))
             if pix.isNull():
                 continue
             loaded[viseme] = pix.scaled(
-                self._avatar_size,
-                self._avatar_size,
+                self._avatar_size, self._avatar_size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -381,11 +679,9 @@ class AvatarWindow(QWidget):
             return
         self.character = name
         self.frames = loaded
-        # Update name label
         display = name.replace("-", " ").title()
         self.char_label.setText(display)
         self._show_viseme("X")
-        # Update settings popup combo if open
         if self._settings_popup and self._settings_popup.isVisible():
             self._settings_popup.combo.blockSignals(True)
             self._settings_popup.combo.setCurrentText(name)
@@ -393,14 +689,12 @@ class AvatarWindow(QWidget):
 
     def resize_avatar(self, size: int) -> None:
         self._avatar_size = size
-        # Reload frames at new size
         self.frames = {}
         self.set_character(self.character)
-        # Resize window
-        total = size + FRAME_PADDING
-        self.resize(total, total)
-        self.frame_widget.resize(total, total)
+        self._update_window_size()
         self._anchor_bottom_right()
+        if self._settings_popup and self._settings_popup.isVisible():
+            self._settings_popup.size_val.setText(f'{size}px')
 
     # -- viseme rendering ----------------------------------------------------
 
@@ -432,8 +726,7 @@ class AvatarWindow(QWidget):
         self._playing = False
         self._tick.stop()
         self._show_viseme("X")
-        if not self._idle_blink.isActive():
-            self._idle_blink.start()
+        self._restart_idle_blink()
 
     def _on_tick(self) -> None:
         if not self._playing:
@@ -475,6 +768,8 @@ class CommandRouter(QObject):
             name = str(payload.get("name", "")).strip()
             if name:
                 self.window.set_character(name)
+        elif cmd == "set_frame_style":
+            self.window.set_frame_style(**{k: v for k, v in payload.items() if k != "cmd"})
         elif cmd == "play":
             cues = payload.get("cues") or []
             duration = float(payload.get("duration") or 0.0)
@@ -510,7 +805,7 @@ def _demo_cues(duration: float = 3.5) -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--character", default=None)
-    parser.add_argument("--demo", action="store_true", help="loop a synthetic viseme stream")
+    parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
 
     base = Path(__file__).resolve().parent

@@ -19,7 +19,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import soundfile as sf
 
@@ -54,6 +54,12 @@ class NullAvatar:
     def stop(self) -> None:
         pass
 
+    def set_character(self, name: str) -> None:
+        pass
+
+    def set_frame_style(self, **kw: Any) -> None:
+        pass
+
     def shutdown(self) -> None:
         pass
 
@@ -61,6 +67,10 @@ class NullAvatar:
 class AvatarController:
     """Live avatar controller. Spawns the PyQt6 sidecar and ships viseme cues
     derived from each TTS WAV.
+
+    The sidecar's stdout is piped back and read in a daemon thread, so
+    settings changes the user makes in the avatar's popup get forwarded to
+    the ``on_setting`` callback.
     """
 
     def __init__(self, config: dict[str, Any]):
@@ -73,6 +83,10 @@ class AvatarController:
         self.process: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._pending: dict | None = None
+
+        # Callback for settings changes emitted by the avatar popup.
+        # Signature: fn(cmd: str, **kwargs)
+        self.on_setting: Callable[[str, Any], None] | None = None
 
         if not self.enabled:
             return
@@ -106,20 +120,42 @@ class AvatarController:
             self.character,
         ]
         env = dict(os.environ)
-        # Force the Qt Wayland platform when available; X11 fallback is automatic.
         env.setdefault("QT_QPA_PLATFORM", "wayland;xcb")
         env.setdefault("PYTHONUNBUFFERED", "1")
         self.process = subprocess.Popen(
             cmd,
             cwd=str(_BASE.parent),
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,    # ← changed from DEVNULL so we read settings
             stderr=subprocess.DEVNULL,
             env=env,
             text=True,
             bufsize=1,
         )
         print(f"[avatar] sidecar started pid={self.process.pid} character={self.character}", flush=True)
+        # Read settings changes from the window in a background thread
+        self._stdout_thread = threading.Thread(target=self._read_stdout, daemon=True)
+        self._stdout_thread.start()
+
+    def _read_stdout(self) -> None:
+        """Read JSON lines from the sidecar's stdout (settings changes)."""
+        if self.process is None or self.process.stdout is None:
+            return
+        try:
+            for line in self.process.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                cmd = payload.get("cmd", "")
+                kw = {k: v for k, v in payload.items() if k != "cmd"}
+                if self.on_setting:
+                    self.on_setting(cmd, kw)
+        except (BrokenPipeError, ValueError):
+            pass
 
     def _send(self, payload: dict) -> None:
         if self.process is None or self.process.poll() is not None:
@@ -134,12 +170,6 @@ class AvatarController:
     # -- viseme extraction ---------------------------------------------------
 
     def _normalise_to_pcm16(self, wav_path: Path) -> Path:
-        """Rhubarb is happiest with 16-bit PCM WAV at 16 kHz mono.
-
-        We always rewrite via soundfile to guarantee that, regardless of what
-        the TTS backend emitted (Kokoro is float32 @ 24 kHz, espeak is PCM16
-        @ 22 kHz).
-        """
         data, sr = sf.read(str(wav_path), always_2d=False)
         if data.ndim > 1:
             data = data.mean(axis=1)
@@ -149,10 +179,6 @@ class AvatarController:
         return Path(tmp)
 
     def preload(self, wav_path: Path, offset_seconds: float = 0.0) -> bool:
-        """Run Rhubarb on ``wav_path`` and buffer the resulting cue list.
-        Returns True when cues are queued and play() will animate; False on
-        any failure (caller proceeds with audio anyway).
-        """
         if not self.enabled or self.rhubarb_path is None:
             return False
         pcm16: Path | None = None
@@ -199,11 +225,19 @@ class AvatarController:
     def stop(self) -> None:
         self._send({"cmd": "stop"})
 
+    # -- styling commands ----------------------------------------------------
+
     def set_character(self, name: str) -> None:
         if not name:
             return
         self.character = name
         self._send({"cmd": "set_character", "name": name})
+
+    def set_frame_style(self, **kw: Any) -> None:
+        """Change frame appearance: shape, color, opacity, border_width."""
+        self._send({"cmd": "set_frame_style", **kw})
+
+    # -- teardown ------------------------------------------------------------
 
     def shutdown(self) -> None:
         if self.process is None:
