@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+# ── Echo-Node v2 environment ────────────────────────────────────────
+# Source this before running any Python commands:
+#   source v2/env.sh && echo_node_export_nvidia_libs
+
+# Activate the project virtual environment
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$ROOT/.venv/bin/activate" ]]; then
+  # shellcheck disable=SC1091
+  source "$ROOT/.venv/bin/activate"
+fi
+
 # Limit ONNX Runtime thread pools for idle efficiency
 # (Drops from 39 threads to ~1 without affecting wake word speed)
 export OMP_NUM_THREADS=1
@@ -9,7 +20,7 @@ export OPENBLAS_NUM_THREADS=1
 export PYTHONWARNINGS=ignore
 
 echo_node_export_nvidia_libs() {
-  local root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+  local root="${1:-$ROOT}"
   if [[ ! -x "$root/.venv/bin/python" ]]; then
     return 0
   fi

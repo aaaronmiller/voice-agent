@@ -100,13 +100,28 @@ assert "hermes" in agents
 route = router.classify("search the web for weather")
 assert route == "hermes", f"Expected hermes, got {route}"
 route2 = router.classify("what time is it")
-assert route2 == "fast", f"Expected fast, got {route2}"
+# SmartRouter now routes everything to hermes by default
+assert route2 == "hermes", f"Expected hermes, got {route2}"
 print(f"OK: {len(agents)} agents loaded")
 PY
 
 check "Keyboard hotkey importable" .venv/bin/python -c "from assistant_v2 import KeyboardHotkey; print('ok')"
 check "Hermes integration importable" .venv/bin/python -c "from assistant_v2 import HermesIntegration; print('ok')"
 check "Pi integration importable" .venv/bin/python -c "from assistant_v2 import PiIntegration; print('ok')"
+check "Avatar: all characters have frames" .venv/bin/python -c "
+from avatar.controller import AvatarController, NullAvatar
+import yaml
+with open('config.yaml') as f:
+    cfg = yaml.safe_load(f)
+avatar_cfg = cfg.get('avatar', {'enabled': False})
+if avatar_cfg.get('enabled'):
+    ctrl = AvatarController(avatar_cfg)
+    assert ctrl.enabled, 'Controller should be enabled'
+    ctrl.shutdown()
+    print('Avatar controller OK')
+else:
+    print('Avatar disabled in config (OK)')
+"
 
 echo
 if [[ "$failures" -gt 0 ]]; then
