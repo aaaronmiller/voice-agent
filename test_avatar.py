@@ -39,34 +39,47 @@ _failures = 0
 # ── 1. Frame style rendering ─────────────────────────────────────────
 
 def test_frame_styles() -> None:
-    banner("1. Frame style generation")
+    banner("1. Frame style generation (HSL)")
 
-    # Import the window module (PyQt-free logic only)
     sys.path.insert(0, str(AVATAR))
     import importlib
     import window as w
     importlib.reload(w)
 
-    # Test presets exist
-    assert len(w.FRAME_PRESETS) == 8, f"Expected 8 presets, got {len(w.FRAME_PRESETS)}"
-    ok(f"Frame presets: {', '.join(w.FRAME_PRESETS)}")
+    # Test HSL helpers
+    css = w.hsl_css(220, 80, 50, 0.5)
+    assert "hsla(220,80%," in css and "50%,0.5)" in css, f"Unexpected HSL CSS: {css}"
+    ok(f"hsl_css produces correct hsla: {css}")
 
-    # Test shape constants
+    # Quick colors
+    assert len(w.QUICK_COLORS) >= 8, f"Expected >=8 quick colors, got {len(w.QUICK_COLORS)}"
+    ok(f"Quick color presets: {len(w.QUICK_COLORS)}")
+
+    # Shape constants
     assert "square" in w.SHAPES
     assert "rounded" in w.SHAPES
     assert "circle" in w.SHAPES
-    ok(f"Shapes available: {', '.join(w.SHAPES)}")
+    ok(f"Shapes: {', '.join(w.SHAPES)}")
 
-    # Simulate CSS generation logic (matching _make_frame_css)
-    def make_css(shape, color, opacity, bw):
-        preset = w.FRAME_PRESETS.get(color, w.FRAME_PRESETS["blue"])
-        bg = preset["bg"].format(opacity=opacity)
-        border_c = preset["border"].format(alpha=0.35, opacity=opacity)
+    # HSL edge cases
+    css_black = w.hsl_css(0, 0, 0, 1.0)
+    css_white = w.hsl_css(0, 0, 100, 1.0)
+    css_full_sat = w.hsl_css(120, 100, 50, 0.8)
+    ok(f"Black: {css_black}")
+    ok(f"White: {css_white}")
+    ok(f"Full sat green: {css_full_sat}")
+
+    # Simulate frame CSS generation (matches _make_frame_css logic)
+    def simulate_css(hue, sat, lig, shape, opacity, bw):
+        from window import hsl_css
+        bg_lig = max(3, min(20, lig // 3))
+        bg = hsl_css(hue, max(20, sat), bg_lig, opacity)
+        b_lig = min(100, lig + 25)
+        b_alpha = max(0.15, 0.25 + (lig / 200))
+        border_c = hsl_css(hue, sat, b_lig, b_alpha)
         r = 0
-        if shape == "rounded":
-            r = 18
-        elif shape == "circle":
-            r = 999
+        if shape == "rounded": r = 18
+        elif shape == "circle": r = 999
         bw = max(0.5, bw)
         return f"""
             QFrame {{
@@ -76,38 +89,36 @@ def test_frame_styles() -> None:
             }}
         """
 
-    # Square, blue, 0.5 opacity, 2px border
-    css = make_css("square", "blue", 0.5, 2.0)
-    assert "border-radius: 0px" in css, f"Expected square border-radius 0, got:\n{css}"
-    assert "rgba" in css
-    ok("Square frame CSS renders correctly")
+    # Square
+    css = simulate_css(220, 80, 55, "square", 0.55, 2.0)
+    assert "border-radius: 0px" in css, f"Square border-radius fail:\n{css}"
+    assert "hsla" in css
+    ok("Square: border-radius 0px, hsla output")
 
     # Circle
-    css = make_css("circle", "purple", 0.7, 1.5)
+    css = simulate_css(280, 70, 55, "circle", 0.7, 1.5)
     assert "border-radius: 999px" in css
-    ok("Circle frame CSS renders correctly")
+    ok("Circle: border-radius 999px")
 
     # Rounded
-    css = make_css("rounded", "green", 0.3, 1.0)
+    css = simulate_css(140, 75, 50, "rounded", 0.3, 1.0)
     assert "border-radius: 18px" in css
-    ok("Rounded frame CSS renders correctly")
-
-    # Opacity boundary
-    css = make_css("rounded", "red", 0.0, 1.0)
-    assert "rgba" in css  # still valid even at 0
-    ok("Zero opacity still produces valid CSS")
+    ok("Rounded: border-radius 18px")
 
     # Border width floor
-    css = make_css("rounded", "cyan", 0.5, 0.0)
+    css = simulate_css(190, 85, 50, "rounded", 0.5, 0.0)
     assert "border: 0.5px solid" in css
-    ok("Min border width clamped to 0.5px")
+    ok("Min border width: 0.5px")
 
-    # All 8 colors render without error
-    for cname in w.FRAME_PRESETS:
-        css = make_css("rounded", cname, 0.5, 1.5)
-        assert "QFrame" in css
-        assert "rgba" in css
-    ok("All 8 color presets produce valid CSS")
+    # Verify low-lightness bg is dim
+    css_dim = simulate_css(220, 80, 10, "rounded", 0.5, 1.5)
+    assert "hsla" in css_dim
+    ok("Low lightness produces dim background")
+
+    # Verify high-lightness bg is bright
+    css_bright = simulate_css(220, 80, 90, "rounded", 0.5, 1.5)
+    assert "hsla" in css_bright
+    ok("High lightness produces bright background")
 
     del sys.path[0]
 

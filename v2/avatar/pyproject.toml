@@ -19,8 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
-avatar-window = "avatar.window:main"
-avatar-preprocess = "avatar.preprocess:main"
+avatar-window = "avatar:window_main"
+avatar-preprocess = "avatar:preprocess_main"
 
 [project.entry-points."echo_node_avatars"]
 raccoon-hacker = "avatar:build_controller"

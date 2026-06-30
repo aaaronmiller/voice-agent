@@ -1,75 +1,89 @@
-# Avatar theme presets
-# Copy one of these into your config.yaml under avatar.frame_style, or
-# pass the keys at runtime via set_frame_style().
+# Avatar theme presets (HSL)
+# Copy one into config.yaml under avatar.frame_style, or pass
+# the keys at runtime via set_frame_style().
 #
 # Usage:
 #   avatar:
 #     frame_style:
 #       shape: circle
-#       color: cyberpunk
-#       opacity: 0.6
-#       border_width: 2.0
+#       hue: 190
+#       saturation: 85
+#       lightness: 50
+#       opacity: 0.60
+#       border_width: 2.5
+#       glow_intensity: 60
+#       pulse_speed: 0.0
+#       pulse_amplitude: 20
 
 themes:
-  # ── Original night-blue ──
   default:
     shape: rounded
-    color: blue
-    opacity: 0.55
-    border_width: 1.5
+    hue: 220; saturation: 80; lightness: 55
+    opacity: 0.55; border_width: 1.5
+    glow_intensity: 35; pulse_speed: 0.0; pulse_amplitude: 20
 
-  # ── Clean minimal ──
   minimal:
     shape: square
-    color: white
-    opacity: 0.30
-    border_width: 0.5
+    hue: 220; saturation: 15; lightness: 85
+    opacity: 0.25; border_width: 0.5
+    glow_intensity: 10; pulse_speed: 0.0; pulse_amplitude: 0
 
-  # ── Dark glass ──
   glass:
     shape: rounded
-    color: cyan
-    opacity: 0.20
-    border_width: 0.5
+    hue: 190; saturation: 85; lightness: 50
+    opacity: 0.15; border_width: 0.5
+    glow_intensity: 15; pulse_speed: 0.0; pulse_amplitude: 0
 
-  # ── Bold game streamer ──
   neon:
     shape: rounded
-    color: purple
-    opacity: 0.65
-    border_width: 2.5
+    hue: 280; saturation: 70; lightness: 55
+    opacity: 0.65; border_width: 2.5
+    glow_intensity: 80; pulse_speed: 1.5; pulse_amplitude: 30
 
-  # ── Warm friendly ──
   warm:
     shape: rounded
-    color: amber
-    opacity: 0.50
-    border_width: 1.5
+    hue: 40; saturation: 90; lightness: 55
+    opacity: 0.50; border_width: 1.5
+    glow_intensity: 40; pulse_speed: 0.0; pulse_amplitude: 15
 
-  # ── High contrast ──
   high-contrast:
     shape: square
-    color: green
-    opacity: 0.75
-    border_width: 3.0
+    hue: 140; saturation: 75; lightness: 50
+    opacity: 0.80; border_width: 3.0
+    glow_intensity: 50; pulse_speed: 0.0; pulse_amplitude: 0
 
-  # ── Soft pastel ──
   pastel:
     shape: rounded
-    color: pink
-    opacity: 0.35
-    border_width: 1.0
+    hue: 330; saturation: 50; lightness: 70
+    opacity: 0.30; border_width: 1.0
+    glow_intensity: 20; pulse_speed: 0.0; pulse_amplitude: 0
 
-  # ── Cyberpunk ──
   cyberpunk:
     shape: circle
-    color: cyan
-    opacity: 0.60
-    border_width: 2.5
+    hue: 190; saturation: 85; lightness: 50
+    opacity: 0.60; border_width: 2.5
+    glow_intensity: 70; pulse_speed: 2.0; pulse_amplitude: 35
 
-  # ── Alert / urgent ──
   alert:
     shape: circle
-    color: red
-    opacity: 0.70
-    border_width: 3.0
+    hue: 0; saturation: 85; lightness: 50
+    opacity: 0.70; border_width: 3.0
+    glow_intensity: 90; pulse_speed: 0.5; pulse_amplitude: 40
+
+  ocean:
+    shape: rounded
+    hue: 200; saturation: 70; lightness: 45
+    opacity: 0.50; border_width: 2.0
+    glow_intensity: 50; pulse_speed: 3.0; pulse_amplitude: 20
+
+  sunset:
+    shape: rounded
+    hue: 15; saturation: 90; lightness: 50
+    opacity: 0.55; border_width: 2.0
+    glow_intensity: 60; pulse_speed: 2.5; pulse_amplitude: 25
+
+  mint:
+    shape: rounded
+    hue: 160; saturation: 65; lightness: 45
+    opacity: 0.45; border_width: 1.5
+    glow_intensity: 45; pulse_speed: 4.0; pulse_amplitude: 15
