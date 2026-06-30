@@ -31,6 +31,8 @@ import requests
 import soundfile as sf
 import yaml
 
+from echo_node.conversation_logger import ConversationLogger, TurnRecord
+
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config.yaml"
@@ -321,6 +323,13 @@ class FasterWhisperSTT:
         self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
         print(f"[timing] stt_load={time.perf_counter() - started:.2f}s", flush=True)
 
+    def unload(self) -> None:
+        if self._model is None:
+            return
+        del self._model
+        self._model = None
+        import gc; gc.collect()
+
     def transcribe(self, wav_path: Path) -> str:
         self.load()
         assert self._model is not None
@@ -347,6 +356,13 @@ class ParakeetSTT:
         print(f"[stt] loading {self.model_name} ({self.quantization}) providers={providers}", flush=True)
         self.model = onnx_asr.load_model(self.model_name, quantization=self.quantization, providers=providers)
         print(f"[timing] stt_load={time.perf_counter() - started:.2f}s", flush=True)
+
+    def unload(self) -> None:
+        if self.model is None:
+            return
+        del self.model
+        self.model = None
+        import gc; gc.collect()
 
     def transcribe(self, wav_path: Path) -> str:
         self.load()
@@ -378,6 +394,13 @@ class KokoroTTS:
         self._kokoro = Kokoro(str(self.model_path), str(self.voices_path))
         print(f"[timing] tts_load={time.perf_counter() - started:.2f}s", flush=True)
 
+    def unload(self) -> None:
+        if self._kokoro is None:
+            return
+        del self._kokoro
+        self._kokoro = None
+        import gc; gc.collect()
+
     def warm(self) -> None:
         fd, name = tempfile.mkstemp(prefix="echo-node-tts-warm-", suffix=".wav")
         os.close(fd)
@@ -403,6 +426,9 @@ class DotsTTS:
 
     def load(self) -> None:
         self._impl.load()
+
+    def unload(self) -> None:
+        self._impl.unload()
 
     def warm(self) -> None:
         self._impl.warm()
@@ -436,6 +462,9 @@ class EspeakTTS:
         )
         return path
 
+    def unload(self) -> None:
+        pass
+
     def warm(self) -> None:
         return
 
@@ -450,6 +479,7 @@ class InterruptibleSpeaker:
         config: dict[str, Any],
         tts_config: dict[str, Any],
         avatar: Any = None,
+        hotkey: Any = None,
     ):
         self.audio = audio
         self.vad = vad
@@ -457,6 +487,7 @@ class InterruptibleSpeaker:
         self.min_speech_seconds = float(config.get("min_speech_seconds", 0.22))
         self.min_playback_age_seconds = float(config.get("min_playback_age_seconds", 0.45))
         self.avatar = avatar
+        self.hotkey = hotkey
         try:
             provider = tts_config.get("provider", "kokoro")
             if provider == "dots":
@@ -465,23 +496,29 @@ class InterruptibleSpeaker:
                 self.tts = KokoroTTS(tts_config)
             else:
                 self.tts = EspeakTTS(tts_config)
-            if provider in ("kokoro", "dots"):
-                self.tts.load()
         except Exception as exc:
             print(f"[tts] {tts_config.get('provider', 'kokoro')} unavailable, falling back to espeak-ng: {exc}", flush=True)
             self.tts = EspeakTTS(tts_config)
+
+    def unload(self) -> None:
+        self.tts.unload()
 
     def warm(self) -> None:
         started = time.perf_counter()
         self.tts.warm()
         print(f"[timing] tts_warm={time.perf_counter() - started:.2f}s", flush=True)
 
-    def speak(self, text: str, mic: MicStream | None = None) -> bool:
+    def speak(self, text: str, mic: MicStream | None = None, turn_rec: Any = None) -> bool:
         interrupted = False
+        first_chunk = True
         for chunk in sentence_chunks(text):
             wav = Path(tempfile.mkstemp(prefix="echo-node-say-", suffix=".wav")[1])
             try:
+                if turn_rec and first_chunk:
+                    turn_rec.t_tts_start = time.perf_counter()
                 self.tts.synthesize_to_wav(chunk, wav)
+                if turn_rec and first_chunk:
+                    turn_rec.t_tts_first_chunk = time.perf_counter()
                 if self.avatar is not None:
                     # Async preload: run Rhubarb in background thread
                     ready = threading.Event()
@@ -495,7 +532,11 @@ class InterruptibleSpeaker:
                     if preload_result[0]:
                         self.avatar.play()
                 try:
+                    if turn_rec and first_chunk:
+                        turn_rec.t_playback_start = time.perf_counter()
                     interrupted = self._play_wav(wav, mic)
+                    if turn_rec and first_chunk:
+                        turn_rec.t_playback_done = time.perf_counter()
                 finally:
                     if self.avatar is not None:
                         self.avatar.stop()
@@ -503,12 +544,16 @@ class InterruptibleSpeaker:
                     break
             finally:
                 wav.unlink(missing_ok=True)
+            first_chunk = False
+        if turn_rec:
+            turn_rec.t_tts_done = time.perf_counter()
         return interrupted
 
-    def speak_stream(self, chunks: Iterable[str], mic: MicStream | None = None) -> tuple[bool, str]:
+    def speak_stream(self, chunks: Iterable[str], mic: MicStream | None = None, turn_rec: Any = None) -> tuple[bool, str]:
         interrupted = False
         buffer = ""
         full = ""
+        first = True
         for piece in chunks:
             if not piece:
                 continue
@@ -520,11 +565,12 @@ class InterruptibleSpeaker:
                 if speakable is None:
                     break
                 text, buffer = speakable
-                interrupted = self.speak(text, mic)
+                interrupted = self.speak(text, mic, turn_rec=turn_rec if first else None)
+                first = False
                 if interrupted:
                     return True, full.strip()
         if buffer.strip() and not interrupted:
-            interrupted = self.speak(buffer.strip(), mic)
+            interrupted = self.speak(buffer.strip(), mic, turn_rec=turn_rec if first else None)
         return interrupted, full.strip()
 
     def _play_wav(self, wav: Path, mic: MicStream | None) -> bool:
@@ -538,6 +584,16 @@ class InterruptibleSpeaker:
         speech_started: float | None = None
 
         while proc.poll() is None:
+            # Check hotkey interrupt (Enter key) — non-consuming flag
+            if self.hotkey and self.hotkey.interrupt_requested():
+                self.hotkey.triggered()  # consume the event so main loop doesn't restart listen
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                print("[hotkey] playback interrupted", flush=True)
+                return True
             if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                 samples = mic.read()
                 if self.vad.is_speech(samples):
@@ -566,6 +622,12 @@ class InterruptibleSpeaker:
 
         try:
             while sd.get_stream().active:
+                # Check hotkey interrupt (Enter key) — non-consuming flag
+                if self.hotkey and self.hotkey.interrupt_requested():
+                    self.hotkey.triggered()  # consume the event
+                    sd.stop()
+                    print("[hotkey] playback interrupted", flush=True)
+                    return True
                 if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                     samples = mic.read()
                     if self.vad.is_speech(samples):
@@ -854,6 +916,8 @@ class KeyboardHotkey:
         self.terminal_enter = bool(config.get("terminal_enter", True))
         self.escape_enabled = bool(config.get("escape_toggle", True))
         self.events: queue.Queue[str] = queue.Queue()
+        # Non-consuming interrupt flag for use during playback
+        self._interrupt_flag = threading.Event()
         self.stop = False
         self._thread: threading.Thread | None = None
         self._listener_thread: threading.Thread | None = None
@@ -871,11 +935,17 @@ class KeyboardHotkey:
             self._listener_thread.start()
 
     def triggered(self) -> bool:
+        """Consumes and returns one event from the queue. Used by main loop."""
         try:
             self.events.get_nowait()
+            self._interrupt_flag.clear()
             return True
         except queue.Empty:
             return False
+
+    def interrupt_requested(self) -> bool:
+        """Non-consuming peek — used by playback loops to check for interrupt."""
+        return self._interrupt_flag.is_set()
 
     def close(self) -> None:
         self.stop = True
@@ -890,14 +960,28 @@ class KeyboardHotkey:
             if line == "":
                 return
             self.events.put("enter")
+            self._interrupt_flag.set()
 
     def _escape_listener(self) -> None:
-        """Listen for Escape key press. Linux: /dev/input, fallback: no-op."""
+        """Listen for Escape key press. Linux, macOS, Windows."""
         if sys.platform == "linux":
             self._escape_linux()
         elif sys.platform == "darwin":
-            self._escape_macos()
-        # On other platforms, Escape is unavailable — Enter still works
+            self._escape_pynput()
+        elif sys.platform == "win32":
+            self._escape_pynput()
+
+    def _escape_pynput(self) -> None:
+        """Cross-platform Escape listener via pynput (macOS, Windows)."""
+        try:
+            from pynput import keyboard as _kb
+            def on_press(key):
+                if not self.stop and key == _kb.Key.esc:
+                    self.events.put("escape")
+            with _kb.Listener(on_press=on_press) as listener:
+                listener.join()
+        except ImportError:
+            pass  # pynput not installed, Escape unavailable
 
     def _escape_linux(self) -> None:
         """Read raw keyboard events from /dev/input for Escape key."""
@@ -928,16 +1012,8 @@ class KeyboardHotkey:
             threading.Thread(target=_read_device, args=(device,), daemon=True).start()
 
     def _escape_macos(self) -> None:
-        """macOS Escape listener via pynput (optional dependency)."""
-        try:
-            from pynput import keyboard as _kb
-            def on_press(key):
-                if not self.stop and key == _kb.Key.esc:
-                    self.events.put("escape")
-            with _kb.Listener(on_press=on_press) as listener:
-                listener.join()
-        except ImportError:
-            pass  # pynput not installed, Escape unavailable
+        """macOS Escape listener via pynput."""
+        self._escape_pynput()
 
 
 # ── Native integration adapters ─────────────────────────────────────
@@ -981,6 +1057,45 @@ class HermesIntegration:
             return str(r.json()["choices"][0]["message"]["content"]).strip()
         except Exception as exc:
             return f"Hermes error: {exc}"
+
+    def chat_stream(self, text: str, system: str = ""):
+        """Stream response tokens from Hermes. Yields (token, is_first) tuples.
+        
+        is_first is True for the first non-empty token.
+        """
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": text})
+        try:
+            with requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json={"model": self.model, "messages": messages, "stream": True},
+                timeout=self.timeout,
+                stream=True,
+            ) as r:
+                r.raise_for_status()
+                first = True
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8")
+                    if not decoded.startswith("data: "):
+                        continue
+                    payload = decoded[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    data = json.loads(payload)
+                    piece = str(data.get("choices", [{}])[0].get("delta", {}).get("content", "") or "")
+                    if piece:
+                        yield piece, first
+                        first = False
+        except Exception as exc:
+            yield f"Hermes stream error: {exc}", False
 
 
 class PiIntegration:
@@ -1116,20 +1231,21 @@ class Assistant:
             print(f"[avatar] disabled: import failed: {exc}", flush=True)
             self.avatar = None
 
-        # Speaker (TTS + barge-in)
-        self.speaker = InterruptibleSpeaker(
-            self.audio_config, self.vad,
-            config.get("barge_in", {}),
-            config.get("tts", {}),
-            avatar=self.avatar,
-        )
+        # Hotkeys (must be before speaker — speaker uses hotkey for interrupt)
+        self.hotkey = KeyboardHotkey(config.get("hotkeys", {}))
 
         # Speech formatting
         self.speech_max_sentences = int(config.get("speech_format", {}).get("max_sentences", 4))
         self.speech_verbose = bool(config.get("speech_format", {}).get("verbose", False))
 
-        # Hotkeys
-        self.hotkey = KeyboardHotkey(config.get("hotkeys", {}))
+        # Speaker (TTS + barge-in, uses hotkey for Enter-to-interrupt)
+        self.speaker = InterruptibleSpeaker(
+            self.audio_config, self.vad,
+            config.get("barge_in", {}),
+            config.get("tts", {}),
+            avatar=self.avatar,
+            hotkey=self.hotkey,
+        )
 
         # Exit phrases
         assistant_cfg = config.get("assistant", {})
@@ -1139,7 +1255,7 @@ class Assistant:
         # Smart Router (agent_profiles)
         from echo_node.agent_profiles import get_all_agents, SmartRouter
         self._all_agents = get_all_agents()
-        self.router = SmartRouter(self._all_agents, default="fast")
+        self.router = SmartRouter(self._all_agents, default="hermes")
 
         # Legacy LLM (direct)
         self.llm = LLMRouter(config.get("llm", {}), system_prompt)
@@ -1156,8 +1272,19 @@ class Assistant:
         self.performance = config.get("performance", {})
         self.stop = False
 
+        # Idle model unloading: if no activity for N seconds, unload STT/TTS
+        self._idle_unload = int(config.get("performance", {}).get("idle_unload_seconds", 300))
+        self._last_activity = time.monotonic()
+        self._last_idle_check = time.monotonic()
+
+        # Post-turn cooldown: wait before re-enabling wake word detection
+        self._post_turn_cooldown = float(config.get("performance", {}).get("post_turn_cooldown_seconds", 3))
+
         # Verbose toggle state (user can say "be verbose" to override)
         self._verbose_override = False
+
+        # Conversation logger for audit & latency analysis
+        self.logger = ConversationLogger(config.get("logging", {}))
 
     def run(self) -> int:
         signal.signal(signal.SIGINT, self._stop)
@@ -1168,12 +1295,24 @@ class Assistant:
         print("[ready] say the wake phrase or press Enter/Escape", flush=True)
         try:
             while not self.stop:
+                # Idle model unloading: if no activity for N seconds, free memory
+                now = time.monotonic()
+                if self._idle_unload > 0 and now - self._last_idle_check >= 5.0:
+                    self._last_idle_check = now
+                    if now - self._last_activity >= self._idle_unload:
+                        self.stt.unload()
+                        self.speaker.unload()
                 # Check for hotkey triggers
                 if self.hotkey.triggered():
                     event = self.hotkey.events.get_nowait() if not self.hotkey.events.empty() else ""
                     print(f"[hotkey] {event or 'manual'} trigger", flush=True)
-                    self.speaker.speak("Yes?", None)
-                    self._handle_turn()
+                    rec = self.logger.new_turn(route="hotkey")
+                    rec.t_wake = time.perf_counter()
+                    self._last_activity = time.monotonic()
+                    self.speaker.speak("Yes?", None, turn_rec=rec)
+                    self._handle_turn(rec)
+                    if self._post_turn_cooldown > 0:
+                        time.sleep(self._post_turn_cooldown)
                     continue
 
                 # Normal wake word flow
@@ -1182,34 +1321,57 @@ class Assistant:
                 if not detected:
                     continue
                 print(f"[wake] {name} {score:.2f}", flush=True)
-                self.speaker.speak("Yes?", None)
-                self._handle_turn()
+                rec = self.logger.new_turn(route="wake")
+                rec.t_wake = time.perf_counter()
+                self._last_activity = time.monotonic()
+                self.speaker.speak("Yes?", None, turn_rec=rec)
+                self._handle_turn(rec)
+                if self._post_turn_cooldown > 0:
+                    time.sleep(self._post_turn_cooldown)
         finally:
+            self.logger.close()
             self.hotkey.close()
             self.mic.close()
             if self.avatar is not None:
                 self.avatar.shutdown()
         return 0
 
-    def _handle_turn(self) -> None:
-        turn_started = time.perf_counter()
+    def _handle_turn(self, rec: 'TurnRecord | None' = None) -> None:
+        if rec is None:
+            rec = self.logger.new_turn(route="internal")
+            rec.t_wake = time.perf_counter()
+
+        rec.t_listen_start = time.perf_counter()
         wav_path = self.recorder.record_turn()
+        rec.t_listen_done = time.perf_counter()
         if wav_path is None:
-            self.speaker.speak("I did not hear speech.", None)
+            rec.error = "no_speech"
+            self.logger.end_turn(rec)
+            self.speaker.speak("I did not hear speech.", None, turn_rec=rec)
             return
+
+        rec.t_stt_start = time.perf_counter()
         try:
             text = self.stt.transcribe(wav_path)
         finally:
             wav_path.unlink(missing_ok=True)
+        rec.t_stt_done = time.perf_counter()
+        rec.stt_model = str(self.config.get("stt", {}).get("model", ""))
+
         if not text:
+            rec.error = "empty_transcription"
+            self.logger.end_turn(rec)
             print("[stt] empty transcription", flush=True)
-            self.speaker.speak("I could not transcribe that.", None)
+            self.speaker.speak("I could not transcribe that.", None, turn_rec=rec)
             return
         print(f"[you] {text}", flush=True)
+        rec.user_text = text
 
         # Check exit phrases
         if text.lower().strip() in self.exit_phrases:
-            self.speaker.speak("Stopping.", None)
+            rec.error = "exit_phrase"
+            self.logger.end_turn(rec)
+            self.speaker.speak("Stopping.", None, turn_rec=rec)
             self.stop = True
             return
 
@@ -1217,69 +1379,119 @@ class Assistant:
         lower = text.lower().strip()
         if lower in {"be verbose", "verbose mode", "verbose on"}:
             self._verbose_override = True
-            self.speaker.speak("Verbose mode on. I will give longer replies.", None)
+            self.speaker.speak("Verbose mode on. I will give longer replies.", None, turn_rec=rec)
+            self.logger.end_turn(rec)
             return
         if lower in {"be concise", "concise mode", "verbose off", "normal mode"}:
             self._verbose_override = False
-            self.speaker.speak("Concise mode on. Short replies.", None)
+            self.speaker.speak("Concise mode on. Short replies.", None, turn_rec=rec)
+            self.logger.end_turn(rec)
             return
 
         # Check for direct Hermes command: "ask hermes ..."
         if lower.startswith("ask hermes ") or lower.startswith("hermes, "):
             query = text[len("ask hermes "):] if lower.startswith("ask hermes ") else text[len("hermes, "):]
-            self._handle_hermes_direct(query)
+            self._handle_hermes_direct(query, rec)
             return
 
         # Check for direct Pi command: "ask pi ..."
         if lower.startswith("ask pi ") or lower.startswith("pi, "):
             query = text[len("ask pi "):] if lower.startswith("ask pi ") else text[len("pi, "):]
-            self._handle_pi_direct(query)
+            self._handle_pi_direct(query, rec)
             return
 
         # Smart route through agent_profiles
         route_key = self.router.classify(text)
+        rec.route = route_key
         print(f"[router] {route_key} → {self.router.agents[route_key].name}", flush=True)
 
-        # If Hermes is available and route is hermes, use native integration
+        rec.t_llm_start = time.perf_counter()
+        # If Hermes is available and route is hermes, use streaming integration
         if route_key == "hermes" and self.hermes and self.hermes.is_available():
-            answer = self.hermes.chat(text, str(self.config.get("assistant", {}).get("system_prompt", "")))
+            rec.llm_model = "hermes-agent"
+            system_prompt = str(self.config.get("assistant", {}).get("system_prompt", ""))
+            # Convert Hermes token stream (token, is_first) into text chunks
+            # while tracking first-token latency
+            def _token_to_text(stream):
+                for token, is_first in stream:
+                    if is_first:
+                        rec.t_llm_first_token = time.perf_counter()
+                    if token:
+                        yield token
+            interrupted, full_text = self.speaker.speak_stream(_token_to_text(self.hermes.chat_stream(text, system_prompt)), self.mic, turn_rec=rec)
+            answer = full_text
         else:
             system = self.config.get("assistant", {}).get("system_prompt", "")
             result = self.router.route(text, system)
             answer = result.text
+            rec.llm_model = result.model
+        rec.t_llm_done = time.perf_counter()
 
-        # Format for speech
-        answer = self._format_reply(answer)
+        # Format for speech (only on non-streamed path; stream path already spoke)
+        if route_key != "hermes" or not (self.hermes and self.hermes.is_available()):
+            answer = self._format_reply(answer)
 
+        rec.assistant_text = answer
         print(f"[assistant/{route_key}] {answer}", flush=True)
-        interrupted = self.speaker.speak(answer, self.mic)
-        print(f"[timing] turn_total={time.perf_counter() - turn_started:.2f}s route={route_key}", flush=True)
-        if interrupted:
-            self._handle_turn()
 
-    def _handle_hermes_direct(self, query: str) -> None:
+        # Non-streamed path: speak full text
+        if route_key != "hermes" or not (self.hermes and self.hermes.is_available()):
+            interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+            rec.interrupted = interrupted
+        else:
+            interrupted = interrupted  # already set from speak_stream
+            rec.interrupted = interrupted
+        self.logger.end_turn(rec)
+        if interrupted:
+            self._handle_turn(rec)
+
+    def _handle_hermes_direct(self, query: str, rec: 'TurnRecord | None' = None) -> None:
         """Direct Hermes invocation with guaranteed tool access."""
+        if rec is None:
+            rec = self.logger.new_turn(route="hermes_direct")
+            rec.t_wake = time.perf_counter()
         if not self.hermes or not self.hermes.is_available():
-            self.speaker.speak("Hermes is not running. Start the Hermes gateway first.", None)
+            rec.error = "hermes_unavailable"
+            self.logger.end_turn(rec)
+            self.speaker.speak("Hermes is not running. Start the Hermes gateway first.", None, turn_rec=rec)
             return
+        rec.user_text = query
+        rec.llm_model = "hermes-agent"
+        rec.t_llm_start = time.perf_counter()
         print(f"[hermes] {query}", flush=True)
         answer = self.hermes.chat(query, str(self.config.get("assistant", {}).get("system_prompt", "")))
+        rec.t_llm_done = time.perf_counter()
         answer = self._format_reply(answer)
+        rec.assistant_text = answer
         print(f"[hermes] {answer}", flush=True)
-        interrupted = self.speaker.speak(answer, self.mic)
+        interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+        rec.interrupted = interrupted
+        self.logger.end_turn(rec)
         if interrupted:
             self._handle_turn()
 
-    def _handle_pi_direct(self, query: str) -> None:
+    def _handle_pi_direct(self, query: str, rec: 'TurnRecord | None' = None) -> None:
         """Direct Pi agent invocation."""
+        if rec is None:
+            rec = self.logger.new_turn(route="pi_direct")
+            rec.t_wake = time.perf_counter()
         if not self.pi_agent or not self.pi_agent.is_available():
-            self.speaker.speak("Pi agent is not available.", None)
+            rec.error = "pi_unavailable"
+            self.logger.end_turn(rec)
+            self.speaker.speak("Pi agent is not available.", None, turn_rec=rec)
             return
+        rec.user_text = query
+        rec.llm_model = "pi-agent"
+        rec.t_llm_start = time.perf_counter()
         print(f"[pi] {query}", flush=True)
         answer = self.pi_agent.chat(query)
+        rec.t_llm_done = time.perf_counter()
         answer = self._format_reply(answer)
+        rec.assistant_text = answer
         print(f"[pi] {answer}", flush=True)
-        interrupted = self.speaker.speak(answer, self.mic)
+        interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+        rec.interrupted = interrupted
+        self.logger.end_turn(rec)
         if interrupted:
             self._handle_turn()
 

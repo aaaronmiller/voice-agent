@@ -1,0 +1,115 @@
+# Echo-Node v2 — WSL2 / Windows-native configuration
+# Copy to config.yaml or run: assistant_v2.py --config config.wsl.yaml
+#
+# Key differences from default config.yaml:
+#   - audio.backend: sounddevice (instead of ALSA/arecord/aplay)
+#   - rhubarb_path adjusted for Windows binary
+#   - No barge-in (uses Enter key instead)
+#
+# Requirements:
+#   pip install pynput    (for Escape key on Windows)
+#   Windows Rhubarb binary at vendor/rhubarb/rhubarb.exe
+
+assistant:
+  name: Echo Node
+  wake_phrase: hey rhasspy
+  exit_phrases:
+  - quit
+  - exit
+  - stop listening
+  system_prompt: "You are a concise local voice assistant. Keep spoken replies brief."
+
+audio:
+  backend: sounddevice          # uses PortAudio (works on Windows natively)
+  sample_rate: 16000
+  chunk_size: 1280
+  input_device: null             # null = Windows default mic
+  output_device: null            # null = Windows default speakers
+
+wake_word:
+  enabled: true
+  sensitivity: 0.35
+  pretrained:
+  - hey_rhasspy
+  model_paths: []
+
+vad:
+  provider: silero-openwakeword
+  speech_threshold: 0.40
+  silence_seconds: 0.4
+  max_record_seconds: 10
+  min_record_seconds: 0.3
+  wake_speech_timeout_seconds: 4
+  rms_floor: 500
+
+barge_in:
+  enabled: false                 # Enter key to interrupt instead
+  min_speech_seconds: 0.8
+  min_playback_age_seconds: 1.0
+  resume_false_interruptions: false
+
+hotkeys:
+  enabled: true
+  terminal_enter: true
+  escape_toggle: true            # works via pynput on Windows
+
+stt:
+  provider: faster-whisper
+  model: tiny
+  device: cpu
+  compute_type: int8
+
+llm:
+  provider: openai-compatible
+  base_url: https://openrouter.ai/api/v1
+  model: nex-agi/nex-n2-pro:free
+  api_key: ""
+  timeout_seconds: 30
+  max_history_turns: 4
+  stream: true
+
+tts:
+  provider: kokoro
+  voice: af_heart
+  speed: 1.3
+  model_path: models/kokoro/kokoro-v1.0.onnx
+  voices_path: models/kokoro/voices-v1.0.bin
+  dots_model_path: models/dots-tts-mf
+  dots_num_steps: 4
+  dots_guidance_scale: 1.2
+  dots_voice: basic_ref_en
+  fallback_provider: espeak-ng
+  espeak_voice: en-us
+  espeak_speed: 165
+  espeak_pitch: 45
+
+performance:
+  preload_stt: false
+  warm_tts: false
+  warm_backend: false
+  idle_unload_seconds: 300
+  post_turn_cooldown_seconds: 3
+
+avatar:
+  enabled: true
+  character: raccoon-hacker
+  recognizer: phonetic
+  extended_shapes: GH
+  rhubarb_path: null             # auto-detects rhubarb(.exe) in PATH
+
+hermes:
+  base_url: http://127.0.0.1:8642/v1
+  model: hermes-agent
+  api_key: "pass"
+  timeout_seconds: 90
+
+pi_agent:
+  command: ["pi", "-p"]
+  timeout_seconds: 120
+
+logging:
+  log_dir: logs
+
+speech_format:
+  max_sentences: 4
+  verbose: false

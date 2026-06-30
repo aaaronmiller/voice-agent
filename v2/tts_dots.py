@@ -135,6 +135,9 @@ class DotsTTS:
         assert self._runtime is not None
         return self._runtime.sample_rate
 
+    def unload(self) -> None:
+        self.close()
+
     def close(self) -> None:
         """Release GPU memory."""
         self._runtime = None

@@ -33,3 +33,9 @@ node_modules/
 *.zip
 *.tar
 *.tar.gz
+logs/__pycache__/
+logs/*.jsonl
+v2/logs/
+.venv/
+v2/models/
+v2/vendor/rhubarb/rhubarb

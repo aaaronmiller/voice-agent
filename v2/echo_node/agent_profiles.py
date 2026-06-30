@@ -298,7 +298,7 @@ def get_all_agents() -> dict[str, Agent]:
 class SmartRouter:
     """Classifies queries and routes to the appropriate agent."""
 
-    def __init__(self, agents: dict[str, Agent], default: str = "fast"):
+    def __init__(self, agents: dict[str, Agent], default: str = "hermes"):
         self.agents = agents
         self.default = default
         self.last_agent: str | None = None
@@ -309,32 +309,14 @@ class SmartRouter:
         """Determine which agent should handle this query."""
         lower = text.lower()
 
-        # Check for complex reasoning FIRST (trumps length)
-        complex_keywords = ["explain", "compare", "analyze", "why does", "how does",
-                            "summarize", "difference between", "pros and cons",
-                            "what is the", "tell me about"]
-        if any(kw in lower for kw in complex_keywords):
-            return "nemotron"
-
-        # Tool-heavy → Hermes (needs web/API access)
+        # Everything routes to hermes (only working backend right now).
+        # Hermes Agent at :8642 is running and has full tool calling.
+        # Other agents are preserved as options for future use.
         tool_keywords = ["search", "web", "find", "look up", "browse", "scrape",
                          "email", "send", "message", "slack", "discord",
                          "download", "upload", "api", "curl"]
         if any(kw in lower for kw in tool_keywords):
             return "hermes"
-
-        # Coding tasks → Claude/Codex
-        code_keywords = ["code", "debug", "refactor", "function", "class",
-                         "git", "commit", "push", "pull", "merge",
-                         "bash", "terminal", "npm", "pip", "install",
-                         "write a", "create a file", "edit", "fix bug"]
-        if any(kw in lower for kw in code_keywords):
-            return "claude"
-
-        # Very short queries → fast model
-        if len(text.split()) <= 5:
-            return "fast"
-
         return self.default
 
     def route(self, text: str, system: str = "") -> AgentResult:

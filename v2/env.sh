@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Limit ONNX Runtime thread pools for idle efficiency
+# (Drops from 39 threads to ~1 without affecting wake word speed)
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+# Disable Python thread-unsafe warnings from onnxruntime
+export PYTHONWARNINGS=ignore
+
 echo_node_export_nvidia_libs() {
   local root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
   if [[ ! -x "$root/.venv/bin/python" ]]; then

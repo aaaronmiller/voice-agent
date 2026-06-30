@@ -7,6 +7,10 @@ openwakeword>=0.6.0
 pyyaml>=6.0
 requests>=2.31
 soundfile>=0.12
+faster-whisper>=1.1
+sounddevice>=0.5
+pynput>=1.7
 
-PyQt6>=6.4
-Pillow>=10.0
+# Avatar (optional — install separately if you want the raccoon)
+# PyQt6>=6.4
+# Pillow>=10.0
