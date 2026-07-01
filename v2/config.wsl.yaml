@@ -44,11 +44,11 @@ vad:
 
 barge_in:
   enabled: true
-  min_speech_seconds: 0.6
-  min_playback_age_seconds: 0.6
-  playback_threshold_boost: 1.8
-  playback_rms_boost: 2.0
-  playback_start_grace_s: 0.3
+  min_speech_seconds: 0.45
+  min_playback_age_seconds: 0.4
+  playback_threshold_boost: 1.35
+  playback_rms_boost: 1.6
+  playback_start_grace_s: 0.15
   resume_false_interruptions: false
 
 hotkeys:

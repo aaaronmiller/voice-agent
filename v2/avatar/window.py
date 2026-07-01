@@ -99,8 +99,8 @@ BTN_STYLE = """
 
 POPUP_STYLE = """
     QFrame#settingsFrame {
-        background: rgba(12,12,30,0.94);
-        border: 1px solid rgba(100,160,255,0.20);
+        background: #1a1a2e;
+        border: 1px solid rgba(100,160,255,0.25);
         border-radius: 16px;
     }
     QLabel {
@@ -242,7 +242,6 @@ class SettingsPopup(QFrame):
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setStyleSheet(POPUP_STYLE)
 
         self.frame_state = dict(frame_state)
@@ -513,7 +512,25 @@ class SettingsPopup(QFrame):
                     lbl.setText(fmt(v) if fmt else str(v))
 
     def show_at(self, x: int, y: int) -> None:
-        self.move(max(0, x - self.width()), max(0, y - self.height()))
+        """Position popup to the left of the avatar window, top-aligned."""
+        parent = self.parent()
+        if parent and hasattr(parent, 'mapToGlobal'):
+            parent_pos = parent.mapToGlobal(parent.rect().topLeft())
+            px = max(8, parent_pos.x() - self.width())
+            py = parent_pos.y()
+        else:
+            # Fallback: above-left of the settings button
+            px = max(8, x - self.width())
+            py = max(8, y - self.height())
+        # Clamp so popup doesn't go off-screen left
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            px = max(geo.x() + 4, px)
+            if px + self.width() > geo.right():
+                px = geo.right() - self.width() - 4
+            py = max(geo.y() + 4, min(py, geo.bottom() - self.height() - 4))
+        self.move(px, py)
         self.show()
 
 

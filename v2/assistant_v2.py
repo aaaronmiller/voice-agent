@@ -589,14 +589,17 @@ class InterruptibleSpeaker:
                            original_rms: float) -> bool:
         """Enhanced speech detection for barge-in during playback.
 
-        During playback the assistant's own voice bleeds into the mic, so we
-        use boosted thresholds to only let *loud, deliberate* speech through.
-        Also bakes in a grace window: the first ``grace_window`` seconds of
-        playback uses even higher thresholds to survive the initial TTS burst.
+        During playback the assistant's own voice bleeds into the mic. A single
+        moderate reading (VAD *or* RMS) isn't enough to trigger — both must
+        exceed the boosted thresholds (AND gate). This prevents the speaker
+        bleed from falsely interrupting while still letting real human speech
+        through (real speech is high in both dimensions).
+
+        The first ``grace_window`` seconds use an even higher boost to survive
+        the initial TTS burst without falsely triggering.
         """
         age = time.monotonic() - started
         if age < grace_window:
-            # First moments: basically deaf — only a shout gets through
             extra = 1.5
         else:
             extra = 1.0
@@ -609,7 +612,11 @@ class InterruptibleSpeaker:
 
         score = self.vad.score(samples)
         rms = rms_int16(samples)
-        return score >= boosted_threshold or rms >= boosted_rms
+
+        # AND gate: both VAD score AND RMS must exceed boosted thresholds.
+        # TTS speaker bleed typically scores moderate on one axis but not both.
+        # Real human speech scores high on both axes.
+        return score >= boosted_threshold and rms >= boosted_rms
 
     def _play_wav(self, wav: Path, mic: MicStream | None) -> bool:
         if self.audio.backend == "sounddevice":
