@@ -43,9 +43,12 @@ vad:
   rms_floor: 500
 
 barge_in:
-  enabled: false                 # Enter key to interrupt instead
-  min_speech_seconds: 0.8
-  min_playback_age_seconds: 1.0
+  enabled: true
+  min_speech_seconds: 0.6
+  min_playback_age_seconds: 0.6
+  playback_threshold_boost: 1.8
+  playback_rms_boost: 2.0
+  playback_start_grace_s: 0.3
   resume_false_interruptions: false
 
 hotkeys:
@@ -71,7 +74,7 @@ llm:
 tts:
   provider: kokoro
   voice: af_heart
-  speed: 1.3
+  speed: 1.35
   model_path: models/kokoro/kokoro-v1.0.onnx
   voices_path: models/kokoro/voices-v1.0.bin
   dots_model_path: models/dots-tts-mf

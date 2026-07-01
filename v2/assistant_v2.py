@@ -486,6 +486,15 @@ class InterruptibleSpeaker:
         self.enabled = bool(config.get("enabled", True))
         self.min_speech_seconds = float(config.get("min_speech_seconds", 0.22))
         self.min_playback_age_seconds = float(config.get("min_playback_age_seconds", 0.45))
+        # Barge-in boost: during active playback, multiply VAD threshold and RMS
+        # floor so the assistant's own speaker bleed doesn't trigger false interrupts,
+        # but a real human voice (loud, sustained) still gets through.
+        self.playback_threshold_boost = float(config.get("playback_threshold_boost", 1.8))
+        self.playback_rms_boost = float(config.get("playback_rms_boost", 2.0))
+        self.playback_start_grace_s = float(config.get("playback_start_grace_s", 0.3))
+        # Cache the original thresholds so we can restore them
+        self._orig_threshold = self.vad.threshold
+        self._orig_rms_floor = self.vad.rms_floor
         self.avatar = avatar
         self.hotkey = hotkey
         try:
@@ -573,6 +582,35 @@ class InterruptibleSpeaker:
             interrupted = self.speak(buffer.strip(), mic, turn_rec=turn_rec if first else None)
         return interrupted, full.strip()
 
+    def _is_bargein_speech(self, samples: np.ndarray,
+                           started: float,
+                           grace_window: float,
+                           original_threshold: float,
+                           original_rms: float) -> bool:
+        """Enhanced speech detection for barge-in during playback.
+
+        During playback the assistant's own voice bleeds into the mic, so we
+        use boosted thresholds to only let *loud, deliberate* speech through.
+        Also bakes in a grace window: the first ``grace_window`` seconds of
+        playback uses even higher thresholds to survive the initial TTS burst.
+        """
+        age = time.monotonic() - started
+        if age < grace_window:
+            # First moments: basically deaf — only a shout gets through
+            extra = 1.5
+        else:
+            extra = 1.0
+
+        boost = self.playback_threshold_boost * extra
+        boosted_threshold = min(0.99, original_threshold * boost)
+
+        rms_boost = self.playback_rms_boost * extra
+        boosted_rms = int(original_rms * rms_boost)
+
+        score = self.vad.score(samples)
+        rms = rms_int16(samples)
+        return score >= boosted_threshold or rms >= boosted_rms
+
     def _play_wav(self, wav: Path, mic: MicStream | None) -> bool:
         if self.audio.backend == "sounddevice":
             return self._play_wav_sounddevice(wav, mic)
@@ -582,11 +620,13 @@ class InterruptibleSpeaker:
         proc = subprocess.Popen(command)
         started = time.monotonic()
         speech_started: float | None = None
+        orig_t = self._orig_threshold
+        orig_r = self._orig_rms_floor
 
         while proc.poll() is None:
             # Check hotkey interrupt (Enter key) — non-consuming flag
             if self.hotkey and self.hotkey.interrupt_requested():
-                self.hotkey.triggered()  # consume the event so main loop doesn't restart listen
+                self.hotkey.triggered()
                 proc.terminate()
                 try:
                     proc.wait(timeout=1)
@@ -596,7 +636,7 @@ class InterruptibleSpeaker:
                 return True
             if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                 samples = mic.read()
-                if self.vad.is_speech(samples):
+                if self._is_bargein_speech(samples, started, self.playback_start_grace_s, orig_t, orig_r):
                     if speech_started is None:
                         speech_started = time.monotonic()
                     if time.monotonic() - speech_started >= self.min_speech_seconds:
@@ -619,18 +659,20 @@ class InterruptibleSpeaker:
         sd.play(data, sample_rate, device=self.audio.output_device, blocking=False)
         started = time.monotonic()
         speech_started: float | None = None
+        orig_t = self._orig_threshold
+        orig_r = self._orig_rms_floor
 
         try:
             while sd.get_stream().active:
                 # Check hotkey interrupt (Enter key) — non-consuming flag
                 if self.hotkey and self.hotkey.interrupt_requested():
-                    self.hotkey.triggered()  # consume the event
+                    self.hotkey.triggered()
                     sd.stop()
                     print("[hotkey] playback interrupted", flush=True)
                     return True
                 if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                     samples = mic.read()
-                    if self.vad.is_speech(samples):
+                    if self._is_bargein_speech(samples, started, self.playback_start_grace_s, orig_t, orig_r):
                         if speech_started is None:
                             speech_started = time.monotonic()
                         if time.monotonic() - speech_started >= self.min_speech_seconds:
