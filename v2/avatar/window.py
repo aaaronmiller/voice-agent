@@ -28,7 +28,7 @@ from typing import Any
 
 import yaml
 from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -534,6 +534,160 @@ class SettingsPopup(QFrame):
         self.show()
 
 
+# ── Debug overlay widget ───────────────────────────────────────────
+
+class _DebugOverlay(QWidget):
+    """Small waveform + threshold lines rendered inside the avatar frame.
+
+    Shows a scrolling RMS waveform with VAD threshold and boosted-threshold
+    lines, plus text labels for the current values. Toggled via:
+        {"cmd":"debug_overlay", "enabled":true}
+    Updated via:
+        {"cmd":"debug_update", "vad":0.45, "rms":600, "threshold":0.40,
+         "boosted_threshold":0.54, "rms_floor":500, "boosted_rms":800,
+         "state":"playing"}
+    """
+
+    def __init__(self, parent: QWidget,
+                 data_ref: dict[str, float],
+                 history_ref: list[float]):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._data = data_ref
+        self._history = history_ref
+        self._max_history = 120
+
+    def paintEvent(self, event):
+        if not self._data:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        if w < 10 or h < 10:
+            painter.end()
+            return
+
+        # Dark background with rounded corners
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 160))
+        painter.drawRoundedRect(0, 0, w, h, 6, 6)
+
+        d = self._data
+        vad = d.get("vad", 0.0)
+        rms = d.get("rms", 0.0)
+        threshold = d.get("threshold", 0.40)
+        boosted = d.get("boosted_threshold", 0.54)
+        rms_floor = d.get("rms_floor", 500)
+        boosted_rms = d.get("boosted_rms", 800)
+        state = d.get("state", "idle")
+
+        # Layout: state label on left, VAD bar in middle, RMS bar on right,
+        # thin waveform along bottom
+        margin = 4
+        lh = 12  # label height
+        bar_h = h - lh - margin * 2
+        third = (w - margin * 2) // 2
+
+        # ── VAD bar (left half) ──
+        vx = margin
+        vw = third - 2
+        # Background track
+        painter.setBrush(QColor(40, 40, 60, 120))
+        painter.drawRoundedRect(vx, margin, vw, bar_h, 3, 3)
+        # Threshold line
+        ty = margin + int(bar_h * (1.0 - threshold))
+        painter.setPen(QPen(QColor(100, 255, 100, 120), 1))
+        painter.drawLine(vx, ty, vx + vw, ty)
+        painter.setPen(QPen(QColor(100, 255, 100, 80), 1))
+        painter.drawText(vx + 2, ty - 2, f"T{threshold:.2f}")
+
+        # Boosted threshold line
+        by = margin + int(bar_h * (1.0 - min(1.0, boosted)))
+        painter.setPen(QPen(QColor(255, 200, 80, 150), 1))
+        painter.drawLine(vx, by, vx + vw, by)
+        painter.setPen(QPen(QColor(255, 200, 80, 80), 1))
+        painter.drawText(vx + 2, by - 2, f"B{boosted:.2f}")
+
+        # VAD fill
+        fill_h = max(2, int(bar_h * vad))
+        fill_y = margin + bar_h - fill_h
+        vad_color = QColor(80, 200, 255, 180)
+        if vad >= boosted:
+            vad_color = QColor(255, 120, 80, 200)
+        elif vad >= threshold:
+            vad_color = QColor(255, 200, 80, 180)
+        painter.setBrush(vad_color)
+        painter.drawRoundedRect(vx + 1, fill_y, vw - 2, fill_h, 2, 2)
+
+        painter.setPen(QColor(180, 220, 255, 180))
+        painter.drawText(vx + 2, margin + bar_h + lh - 2, f"VAD {vad:.2f}")
+
+        # ── RMS bar (right half) ──
+        rx = vx + vw + 4
+        rw = third - 2
+        max_rms = max(2000, boosted_rms * 2)
+        painter.setBrush(QColor(40, 40, 60, 120))
+        painter.drawRoundedRect(rx, margin, rw, bar_h, 3, 3)
+
+        # RMS floor line
+        rfy = margin + int(bar_h * (1.0 - min(1.0, rms_floor / max_rms)))
+        painter.setPen(QPen(QColor(100, 255, 100, 120), 1))
+        painter.drawLine(rx, rfy, rx + rw, rfy)
+        painter.setPen(QPen(QColor(100, 255, 100, 80), 1))
+        painter.drawText(rx + 2, rfy - 2, f"R{rms_floor:.0f}")
+
+        # Boosted RMS line
+        brfy = margin + int(bar_h * (1.0 - min(1.0, boosted_rms / max_rms)))
+        painter.setPen(QPen(QColor(255, 200, 80, 150), 1))
+        painter.drawLine(rx, brfy, rx + rw, brfy)
+        painter.setPen(QPen(QColor(255, 200, 80, 80), 1))
+        painter.drawText(rx + 2, brfy - 2, f"BR{boosted_rms:.0f}")
+
+        # RMS fill
+        rms_norm = min(1.0, rms / max_rms)
+        rfill_h = max(2, int(bar_h * rms_norm))
+        rfill_y = margin + bar_h - rfill_h
+        rms_color = QColor(80, 200, 255, 180)
+        if rms >= boosted_rms:
+            rms_color = QColor(255, 120, 80, 200)
+        elif rms >= rms_floor:
+            rms_color = QColor(255, 200, 80, 180)
+        painter.setBrush(rms_color)
+        painter.drawRoundedRect(rx + 1, rfill_y, rw - 2, rfill_h, 2, 2)
+
+        painter.setPen(QColor(180, 220, 255, 180))
+        painter.drawText(rx + 2, margin + bar_h + lh - 2, f"RMS {rms:.0f}")
+
+        # ── State label ──
+        painter.setPen(QColor(255, 255, 255, 200))
+        font = QFont("monospace", 8)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(self.width() - 60, margin + lh, state.upper())
+
+        # ── Scrolling waveform (thin line at bottom of bars) ──
+        if len(self._history) > 1:
+            wave_y = margin + bar_h + 2
+            wave_h = lh - 6
+            painter.setPen(QPen(QColor(100, 180, 255, 120), 1))
+            path = QPainterPath()
+            hist = self._history[-self._max_history:]
+            step_x = min(rx + rw - rx, self._max_history) / len(hist)
+            for i, val in enumerate(hist):
+                norm = min(1.0, val / max_rms)
+                px = rx + i * step_x
+                py = wave_y + wave_h - norm * wave_h
+                if i == 0:
+                    path.moveTo(px, py)
+                else:
+                    path.lineTo(px, py)
+            painter.drawPath(path)
+
+        painter.end()
+
+
 # ── Main avatar window ──────────────────────────────────────────────
 
 class AvatarWindow(QWidget):
@@ -648,6 +802,21 @@ class AvatarWindow(QWidget):
         self._pulse_timer.setInterval(33)  # ~30 fps
         self._pulse_timer.timeout.connect(self._on_pulse_tick)
 
+        # ── Debug overlay (VAD/RMS waveform) ──
+        self._debug_enabled = False
+        self._debug_data: dict[str, float] = {
+            "vad": 0.0, "rms": 0.0, "threshold": 0.40,
+            "boosted_threshold": 0.54, "rms_floor": 500,
+            "boosted_rms": 800, "state": "idle",
+        }
+        self._debug_history: list[float] = []  # RMS history for waveform
+        self._debug_timer = QTimer(self)
+        self._debug_timer.setInterval(100)  # 10 fps refresh
+        self._debug_timer.timeout.connect(self._debug_repaint)
+        # Overlay widget for painting
+        self._debug_overlay = _DebugOverlay(self.frame_widget, self._debug_data, self._debug_history)
+        self._debug_overlay.hide()
+
         # Settings popup
         self._settings_popup: SettingsPopup | None = None
 
@@ -716,6 +885,30 @@ class AvatarWindow(QWidget):
         self._pulse_tick = 0.0
         self._glow_effect.setColor(self._get_glow_color())
         self._glow_effect.setBlurRadius(self._get_glow_blur())
+
+    # ── Debug overlay ───────────────────────────────────────────────────
+
+    def _debug_repaint(self) -> None:
+        """Called by _debug_timer to refresh the overlay."""
+        if self._debug_enabled and self._debug_overlay:
+            self._debug_overlay.update()
+
+    def set_debug_enabled(self, enabled: bool) -> None:
+        self._debug_enabled = enabled
+        self._debug_overlay.setVisible(enabled)
+        if enabled:
+            self._debug_timer.start()
+        else:
+            self._debug_timer.stop()
+
+    def update_debug_data(self, **kw: float) -> None:
+        """Update VAD/RMS/threshold values from the assistant."""
+        self._debug_data.update(kw)
+        # Track RMS history for scrolling waveform
+        if "rms" in kw:
+            self._debug_history.append(kw["rms"])
+            if len(self._debug_history) > 200:
+                self._debug_history[:] = self._debug_history[-200:]
 
     def _on_pulse_tick(self) -> None:
         if self._pulse_speed <= 0 or self._glow_intensity <= 0:
@@ -802,6 +995,14 @@ class AvatarWindow(QWidget):
         total = self._avatar_size + 56
         self.resize(total, total)
         self.frame_widget.resize(total, total)
+        # Reposition debug overlay within the frame
+        if hasattr(self, '_debug_overlay'):
+            inset = 4
+            ow = self.frame_widget.width() - inset * 2
+            oh = 52
+            self._debug_overlay.setGeometry(inset,
+                                             self.frame_widget.height() - oh - inset,
+                                             ow, oh)
 
     def _anchor_bottom_right(self) -> None:
         screen = QGuiApplication.primaryScreen()
@@ -986,7 +1187,16 @@ class CommandRouter(QObject):
             self.window.show()
         elif cmd == "hide":
             self.window.hide()
+        elif cmd == "debug_overlay":
+            self.window.set_debug_enabled(bool(payload.get("enabled", False)))
+        elif cmd == "debug_update":
+            self.window.update_debug_data(**{
+                k: v for k, v in payload.items()
+                if k in ("vad", "rms", "threshold", "boosted_threshold",
+                         "rms_floor", "boosted_rms", "state")
+            })
         elif cmd == "quit":
+            QApplication.instance().quit()
             QApplication.instance().quit()
 
 

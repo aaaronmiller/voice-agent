@@ -1033,27 +1033,33 @@ class KeyboardHotkey:
             pass  # pynput not installed, Escape unavailable
 
     def _escape_linux(self) -> None:
-        """Read raw keyboard events from /dev/input for Escape key."""
+        """Read raw keyboard events from /dev/input for Escape key.
+
+        A single physical keyboard often appears on multiple ``/dev/input/event*``
+        devices (e.g. event3 + event4), so we deduplicate with a time-based
+        debounce: an Escape press within 250ms of the previous one is dropped.
+        """
         import glob
-        # Find keyboard event device
         keyboards = glob.glob("/dev/input/event*")
         if not keyboards:
             return
+
+        _last_esc = [0.0]  # mutable shared state across threads
 
         def _read_device(path: str) -> None:
             try:
                 with open(path, "rb") as f:
                     while not self.stop:
-                        # Read 16-byte input_event struct
                         event = f.read(16)
                         if not event or len(event) < 16:
                             break
-                        # struct input_event: timeval(16 bytes) + type(2) + code(2) + value(4)
-                        # type=1 (EV_KEY), code=1 (KEY_ESC), value=1 (press)
                         import struct
                         _, _, ev_type, ev_code, ev_value = struct.unpack("=llHHi", event)
                         if ev_type == 1 and ev_code == 1 and ev_value == 1:
-                            self.events.put("escape")
+                            now = time.monotonic()
+                            if now - _last_esc[0] > 0.25:
+                                _last_esc[0] = now
+                                self.events.put("escape")
             except (PermissionError, OSError, FileNotFoundError):
                 pass
 
@@ -1362,6 +1368,13 @@ class Assistant:
                     self._handle_turn(rec)
                     if self._post_turn_cooldown > 0:
                         time.sleep(self._post_turn_cooldown)
+                    # Flush any stale hotkey events that accumulated during the
+                    # turn (e.g., double-fire from multiple /dev/input devices).
+                    while not self.hotkey.events.empty():
+                        try:
+                            self.hotkey.events.get_nowait()
+                        except Exception:
+                            break
                     continue
 
                 # Normal wake word flow
