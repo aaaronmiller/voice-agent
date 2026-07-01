@@ -1,40 +1,52 @@
 #!/usr/bin/env bash
-# Launch Echo-Node voice assistant in tmux.
-# Bound to Ctrl+Shift+Q in GNOME Keyboard Shortcuts.
+# Echo-Node hotkey launcher — bound to Ctrl+Shift+Q in GNOME.
+#
+# Behaviour:
+#   1. If the assistant + avatar are already running, send a "toggle" command
+#      to the avatar window via the named FIFO (show if hidden, hide if visible).
+#   2. If nothing is running, launch everything fresh.
 #
 # Usage:
-#   echo-node-launch        — start silently (for hotkey bindings)
-#   echo-node-launch --show — start and attach to tmux (for terminal)
-#
-# Runtime stdout+stderr (incl. tracebacks) are persisted to
-# v2/logs/runtime-<timestamp>.log so an issue days later is diagnosable.
-# The tmux pane still shows live output; last 15 runtime logs are kept.
+#   echo-node-launch            — toggle or launch (for hotkey binding)
+#   echo-node-launch --show     — launch and attach tmux (for terminal)
 
 set -euo pipefail
 
 ROOT="/home/misscheta/code/voice-agent/v2"
 SESSION="echo-node"
 LOG_DIR="$ROOT/logs"
+FIFO="/tmp/echo-node-avatar.fifo"
+
+# ── If the avatar FIFO exists, send a toggle command ────────────────
+if [[ -p "$FIFO" ]]; then
+  # Check if the avatar window process is actually alive
+  if pgrep -f "avatar.window" | grep -v bash | grep -q python; then
+    echo "{\"cmd\":\"toggle\"}" > "$FIFO" 2>/dev/null || true
+    notify-send -t 2000 "Echo-Node" "Toggled avatar window" 2>/dev/null || true
+    exit 0
+  fi
+fi
+
+# ── Otherwise start everything fresh ────────────────────────────────
 mkdir -p "$LOG_DIR"
 RUNTIME_LOG="$LOG_DIR/runtime-$(date +%Y%m%d_%H%M%S).log"
 
 # Prune old runtime logs (keep newest 15)
 ls -1t "$LOG_DIR"/runtime-*.log 2>/dev/null | tail -n +16 | xargs -r rm -f
 
-# Kill any existing session
+# Kill any stale processes
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 pkill -f "assistant_v2.py" 2>/dev/null || true
 sleep 1
 
-# Start fresh
 cd "$ROOT"
 source "$ROOT/env.sh"
 echo_node_export_nvidia_libs "$ROOT"
+
+# Start a fresh tmux session
 QT_QPA_PLATFORM='wayland;xcb' DISPLAY=:0 \
   tmux new-session -d -s "$SESSION"
 
-# PYTHONUNBUFFERED=1 so log lines flush promptly; tee persists AND shows in pane.
-# `set -o pipefail` inside the pane preserves python's exit status through tee.
 tmux send-keys -t "$SESSION" \
   "cd $ROOT && source env.sh && echo_node_export_nvidia_libs . && set -o pipefail && QT_QPA_PLATFORM='wayland;xcb' DISPLAY=:0 PYTHONUNBUFFERED=1 .venv/bin/python assistant_v2.py 2>&1 | tee -a '$RUNTIME_LOG'" Enter
 

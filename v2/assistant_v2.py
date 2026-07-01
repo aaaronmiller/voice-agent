@@ -23,7 +23,7 @@ import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import numpy as np
@@ -497,6 +497,9 @@ class InterruptibleSpeaker:
         self._orig_rms_floor = self.vad.rms_floor
         self.avatar = avatar
         self.hotkey = hotkey
+        # Debug data callback — called after each VAD reading during playback
+        # with {"vad": 0.45, "rms": 600, "threshold": 0.40, ...}
+        self.debug_callback: Callable[[dict], None] | None = None
         try:
             provider = tts_config.get("provider", "kokoro")
             if provider == "dots":
@@ -516,6 +519,19 @@ class InterruptibleSpeaker:
         started = time.perf_counter()
         self.tts.warm()
         print(f"[timing] tts_warm={time.perf_counter() - started:.2f}s", flush=True)
+
+    def _send_debug(self, vad_score: float, rms_val: float, state: str) -> None:
+        """Send VAD/RMS/threshold data to the avatar debug overlay."""
+        if self.debug_callback:
+            self.debug_callback({
+                "vad": vad_score,
+                "rms": rms_val,
+                "threshold": self._orig_threshold,
+                "boosted_threshold": min(0.99, self._orig_threshold * self.playback_threshold_boost),
+                "rms_floor": self._orig_rms_floor,
+                "boosted_rms": int(self._orig_rms_floor * self.playback_rms_boost),
+                "state": state,
+            })
 
     def speak(self, text: str, mic: MicStream | None = None, turn_rec: Any = None) -> bool:
         interrupted = False
@@ -643,6 +659,8 @@ class InterruptibleSpeaker:
                 return True
             if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                 samples = mic.read()
+                # Debug: send VAD/RMS data to avatar overlay
+                self._send_debug(self.vad.score(samples), rms_int16(samples), "playing")
                 if self._is_bargein_speech(samples, started, self.playback_start_grace_s, orig_t, orig_r):
                     if speech_started is None:
                         speech_started = time.monotonic()
@@ -679,6 +697,8 @@ class InterruptibleSpeaker:
                     return True
                 if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                     samples = mic.read()
+                    # Debug: send VAD/RMS data to avatar overlay
+                    self._send_debug(self.vad.score(samples), rms_int16(samples), "playing")
                     if self._is_bargein_speech(samples, started, self.playback_start_grace_s, orig_t, orig_r):
                         if speech_started is None:
                             speech_started = time.monotonic()
@@ -1301,6 +1321,12 @@ class Assistant:
             avatar=self.avatar,
             hotkey=self.hotkey,
         )
+
+        # Wire debug data to avatar overlay
+        def _debug_to_avatar(data: dict) -> None:
+            if self.avatar is not None and hasattr(self.avatar, '_send'):
+                self.avatar._send({"cmd": "debug_update", **data})
+        self.speaker.debug_callback = _debug_to_avatar
 
         # Exit phrases
         assistant_cfg = config.get("assistant", {})

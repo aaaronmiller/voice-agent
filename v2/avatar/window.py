@@ -21,14 +21,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
 import yaml
-from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QObject, QPointF, QSizeF, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QAction, QColor, QCursor, QFont, QGuiApplication, QIcon, QPainter,
+    QPainterPath, QPen, QPixmap,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -39,6 +43,8 @@ from PyQt6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QMenu,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +53,9 @@ VISEMES: tuple[str, ...] = ("X", "A", "B", "C", "D", "E", "F", "G", "H")
 DEFAULT_SIZE = 220
 MARGIN = 16
 IDLE_BLINK_PERIOD_S = 4.5
+
+# Named pipe for external IPC (e.g., hotkey toggle outside the assistant)
+AVATAR_FIFO = "/tmp/echo-node-avatar.fifo"
 
 # ── Default frame style (HSL) ───────────────────────────────────────
 
@@ -701,6 +710,7 @@ class AvatarWindow(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setMouseTracking(True)
 
         self.frames_root = frames_root
         self.manifest = manifest
@@ -708,6 +718,17 @@ class AvatarWindow(QWidget):
         self.character: str = ""
         self.frames: dict[str, QPixmap] = {}
         self._avatar_size = DEFAULT_SIZE
+        self._min_size = 100
+        self._max_size = 600
+
+        # Drag state
+        self._drag_pos: QPointF | None = None
+        # Resize state
+        self._resizing = False
+        self._resize_edge = 0  # bitmask: 1=left, 2=right, 4=top, 8=bottom
+        self._resize_start_pos: QPointF | None = None
+        self._resize_start_size: QSizeF | None = None
+        self.RESIZE_MARGIN = 8  # px from edge to detect resize
 
         # ── Frame style state (HSL) ──
         self._frame_shape = DEFAULT_SHAPE
@@ -739,8 +760,40 @@ class AvatarWindow(QWidget):
 
         # Layout inside frame
         frame_layout = QVBoxLayout(self.frame_widget)
-        frame_layout.setContentsMargins(8, 8, 8, 8)
+        frame_layout.setContentsMargins(8, 4, 8, 8)
         frame_layout.setSpacing(4)
+
+        # ── Title bar (drag handle + close) ──
+        title_bar = QHBoxLayout()
+        title_bar.setContentsMargins(4, 0, 0, 0)
+        title_bar.setSpacing(2)
+
+        self._title_label = QLabel()
+        self._title_label.setStyleSheet("color: rgba(180,200,255,0.35); font-size: 8px; padding: 0;")
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        title_bar.addWidget(self._title_label, stretch=1)
+
+        self._min_btn = QPushButton("─")
+        self._min_btn.setFixedSize(16, 16)
+        self._min_btn.setStyleSheet("""
+            QPushButton { background: rgba(60,60,90,0.50); color: #889; border: none; border-radius: 8px; font-size: 8px; }
+            QPushButton:hover { background: rgba(100,140,200,0.40); color: #dde; }
+        """)
+        self._min_btn.setToolTip("Minimize to tray")
+        self._min_btn.clicked.connect(self._minimize_to_tray)
+        title_bar.addWidget(self._min_btn)
+
+        self._close_btn = QPushButton("✕")
+        self._close_btn.setFixedSize(16, 16)
+        self._close_btn.setStyleSheet("""
+            QPushButton { background: rgba(200,60,60,0.40); color: #c88; border: none; border-radius: 8px; font-size: 8px; }
+            QPushButton:hover { background: rgba(220,80,80,0.70); color: white; }
+        """)
+        self._close_btn.setToolTip("Close to tray")
+        self._close_btn.clicked.connect(self._minimize_to_tray)
+        title_bar.addWidget(self._close_btn)
+
+        frame_layout.addLayout(title_bar)
 
         # Avatar sprite
         self.label = QLabel()
@@ -1013,6 +1066,95 @@ class AvatarWindow(QWidget):
         y = geo.y() + geo.height() - self.height() - MARGIN - 40
         self.move(x, y)
 
+    # ── Window chrome: drag, resize, minimize ────────────────────────────
+
+    def _minimize_to_tray(self) -> None:
+        self.hide()
+
+    def _edge_at(self, pos: QPointF) -> int:
+        """Return bitmask of edges at the given local position."""
+        m = self.RESIZE_MARGIN
+        w, h = self.width(), self.height()
+        edges = 0
+        if pos.x() < m:
+            edges |= 1  # left
+        if pos.x() > w - m:
+            edges |= 2  # right
+        if pos.y() < m:
+            edges |= 4  # top
+        if pos.y() > h - m:
+            edges |= 8  # bottom
+        return edges
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            edge = self._edge_at(event.position())
+            if edge:
+                self._resizing = True
+                self._resize_edge = edge
+                self._resize_start_pos = event.position()
+                self._resize_start_size = QSizeF(self.size())
+            else:
+                self._drag_pos = event.position()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+            self._resizing = False
+            self._resize_edge = 0
+            self._resize_start_pos = None
+            self._resize_start_size = None
+            self.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+
+    def mouseMoveEvent(self, event):
+        pos = event.position()
+        if self._resizing and self._resize_start_pos and self._resize_start_size:
+            dx = pos.x() - self._resize_start_pos.x()
+            dy = pos.y() - self._resize_start_pos.y()
+            edge = self._resize_edge
+            new_w = self._resize_start_size.width()
+            new_h = self._resize_start_size.height()
+            new_x = self.x()
+            new_y = self.y()
+
+            if edge & 1:  # left
+                new_w -= dx
+                new_x += dx
+            if edge & 2:  # right
+                new_w += dx
+            if edge & 4:  # top
+                new_h -= dy
+                new_y += dy
+            if edge & 8:  # bottom
+                new_h += dy
+
+            new_w = max(self._min_size, int(new_w))
+            new_h = max(self._min_size, int(new_h))
+            self.resize(new_w, new_h)
+            if edge & (1 | 4):
+                self.move(new_x, new_y)
+            # Scale avatar proportionally
+            av_size = min(new_w, new_h) - 56
+            if av_size >= self._min_size:
+                self._avatar_size = av_size
+                self.frames = {}
+                self.set_character(self.character)
+                self.frame_widget.resize(new_w, new_h)
+        elif self._drag_pos is not None:
+            self.move(self.pos() + event.position().toPoint() - self._drag_pos.toPoint())
+        else:
+            edge = self._edge_at(pos)
+            cursor = Qt.CursorShape.ArrowCursor
+            if edge in (1 | 4, 2 | 8):
+                cursor = Qt.CursorShape.SizeFDiagCursor
+            elif edge in (2 | 4, 1 | 8):
+                cursor = Qt.CursorShape.SizeBDiagCursor
+            elif edge & (1 | 2):
+                cursor = Qt.CursorShape.SizeHorCursor
+            elif edge & (4 | 8):
+                cursor = Qt.CursorShape.SizeVerCursor
+            self.setCursor(QCursor(cursor))
+
     # ── Character navigation ─────────────────────────────────────────────
 
     def _prev_character(self) -> None:
@@ -1185,8 +1327,17 @@ class CommandRouter(QObject):
             self.window.stop_play()
         elif cmd == "show":
             self.window.show()
+            self.window.raise_()
+            self.window.activateWindow()
         elif cmd == "hide":
             self.window.hide()
+        elif cmd == "toggle":
+            if self.window.isVisible():
+                self.window.hide()
+            else:
+                self.window.show()
+                self.window.raise_()
+                self.window.activateWindow()
         elif cmd == "debug_overlay":
             self.window.set_debug_enabled(bool(payload.get("enabled", False)))
         elif cmd == "debug_update":
@@ -1196,8 +1347,112 @@ class CommandRouter(QObject):
                          "rms_floor", "boosted_rms", "state")
             })
         elif cmd == "quit":
+            try:
+                os.unlink(AVATAR_FIFO)
+            except OSError:
+                pass
             QApplication.instance().quit()
-            QApplication.instance().quit()
+
+
+# ── Named pipe for external IPC ─────────────────────────────────────
+
+class FifoReader(QThread):
+    """Reads JSON commands from a named pipe at ``/tmp/echo-node-avatar.fifo``
+    so that external scripts (e.g. the Ctrl+Shift+Q hotkey) can toggle the
+    avatar window without going through the assistant's stdin."""
+    command = pyqtSignal(dict)
+
+    def run(self) -> None:
+        import stat as _stat
+        try:
+            os.mkfifo(AVATAR_FIFO, 0o644)
+        except FileExistsError:
+            if not _stat.S_ISFIFO(os.stat(AVATAR_FIFO).st_mode):
+                os.unlink(AVATAR_FIFO)
+                os.mkfifo(AVATAR_FIFO, 0o644)
+        except (PermissionError, OSError):
+            return
+
+        while not self.isInterruptionRequested():
+            try:
+                with open(AVATAR_FIFO, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            payload = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(payload, dict):
+                            self.command.emit(payload)
+            except (OSError, ValueError):
+                break
+
+
+# ── Tray icon ───────────────────────────────────────────────────────
+
+def _make_tray_icon(window: AvatarWindow, router: CommandRouter) -> QSystemTrayIcon:
+    """Create a system tray icon with context menu.
+
+    Shows a small coloured circle in the system tray (notification area).
+    Double-click toggles the avatar window. Right-click for a menu with:
+    Show/Hide, Settings, Character switcher, Debug overlay, Quit.
+    """
+    # Generate a simple 32px coloured-circle pixmap as the icon
+    icon = QIcon()
+    pix = QPixmap(32, 32)
+    pix.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    outer = QColor(80, 160, 255)
+    p.setBrush(outer)
+    p.setPen(QPen(QColor(120, 200, 255, 180), 1))
+    p.drawEllipse(2, 2, 28, 28)
+    p.setBrush(QColor(160, 220, 255, 60))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(7, 7, 9, 9)
+    p.end()
+    icon.addPixmap(pix)
+
+    tray = QSystemTrayIcon(icon)
+    tray.setToolTip("Echo-Node Avatar")
+
+    menu = QMenu()
+
+    show_action = menu.addAction("Show / Hide")
+    show_action.triggered.connect(lambda: router.on_command({"cmd": "toggle"}))
+
+    settings_action = menu.addAction("⚙ Settings")
+    settings_action.triggered.connect(lambda: window._toggle_settings())
+
+    menu.addSeparator()
+
+    char_menu = menu.addMenu("Character")
+    for ch in window.character_list:
+        a = char_menu.addAction(ch.replace("-", " ").title())
+        a.triggered.connect(lambda _checked, c=ch: router.on_command({"cmd": "set_character", "name": c}))
+
+    menu.addSeparator()
+
+    debug_action = menu.addAction("Debug Overlay")
+    debug_action.setCheckable(True)
+    debug_action.triggered.connect(
+        lambda checked: router.on_command({"cmd": "debug_overlay", "enabled": checked})
+    )
+
+    menu.addSeparator()
+
+    quit_action = menu.addAction("Quit")
+    quit_action.triggered.connect(lambda: router.on_command({"cmd": "quit"}))
+
+    tray.setContextMenu(menu)
+    tray.activated.connect(
+        lambda reason: router.on_command({"cmd": "toggle"})
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick
+        else None
+    )
+    return tray
 
 
 # ── Entry point ──────────────────────────────────────────────────────
@@ -1241,9 +1496,18 @@ def main() -> int:
         demo_timer.start()
         window.start_play(_demo_cues(), 3.5)
     else:
+        # Stdin reader (from controller)
         reader = StdinReader()
         reader.command.connect(router.on_command)
         reader.start()
+        # Named pipe (from external scripts like hotkey)
+        fifo = FifoReader()
+        fifo.command.connect(router.on_command)
+        fifo.start()
+
+    # System tray icon
+    tray = _make_tray_icon(window, router)
+    tray.show()
 
     return app.exec()
 
