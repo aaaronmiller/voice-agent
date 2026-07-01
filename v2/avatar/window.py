@@ -860,6 +860,11 @@ class AvatarWindow(QWidget):
         # Track last visible viseme for live-resize re-render
         self._current_viseme: str = "X"
 
+        # ── Tray icon state ──
+        self._tray_glyph: str = NERD_ICON_PRESETS[0][0]
+        self._tray_state_ref: dict[str, Any] | None = None
+        self._tray_state_action: QAction | None = None
+
         # ── Debug panel (hidden by default, toggled via IPC) ──
         self._debug_data: dict[str, float] = {
             "vad": 0.0, "rms": 0.0, "threshold": 0.40,
@@ -1022,6 +1027,10 @@ class AvatarWindow(QWidget):
             self._debug_history.append(kw["rms"])
             if len(self._debug_history) > 200:
                 self._debug_history[:] = self._debug_history[-200:]
+        # Update tray icon state when assistant state changes
+        state = kw.get("state")
+        if state and state in _STATE_COLORS and self._tray_state_ref:
+            _update_tray_icon(self._tray_state_ref, state=state)
 
     def _on_pulse_tick(self) -> None:
         if self._pulse_speed <= 0 or self._glow_intensity <= 0:
@@ -1254,6 +1263,20 @@ class AvatarWindow(QWidget):
             self._idle_blink.setInterval(int(self._blink_interval * 1000))
             self._idle_blink.start()
 
+    def _set_tray_glyph(self, glyph: str, _name: str = "") -> None:
+        """Change the tray icon glyph (called from icon submenu)."""
+        self._tray_glyph = glyph
+        if self._tray_state_ref:
+            _update_tray_icon(self._tray_state_ref, glyph=glyph)
+            # Update check marks in tray icon submenu
+            for a in self._tray_state_ref.get("icon_group", []):
+                a.setChecked(False)
+            # Find and check the matching action
+            for a in self._tray_state_ref.get("icon_group", []):
+                if glyph == getattr(a, "_glyph", None):
+                    a.setChecked(True)
+                    break
+
     # ── Character loading ────────────────────────────────────────────────
 
     def set_character(self, name: str) -> None:
@@ -1461,41 +1484,198 @@ class FifoReader(QThread):
                 break
 
 
-# ── Tray icon ───────────────────────────────────────────────────────
+# ── Nerd Font helpers ───────────────────────────────────────────────
 
-def _make_tray_icon(window: AvatarWindow, router: CommandRouter) -> QSystemTrayIcon:
-    """Create a system tray icon with context menu.
+NERD_FONT_GLYPH: str = ""  # single char string, e.g. "\uf130" for mic
+NERD_FONT_NAME: str = ""  # cached font family name
+NERD_FONT_CHECKED: bool = False
 
-    Shows a small coloured circle in the system tray (notification area).
-    Double-click toggles the avatar window. Right-click for a menu with:
-    Show/Hide, Settings, Character switcher, Debug overlay, Quit.
+# State → colour map for tray icon
+_STATE_COLORS: dict[str, QColor] = {
+    "idle":        QColor(80, 160, 255, 180),       # dim blue
+    "listening":   QColor(60, 220, 120, 220),        # green
+    "transcribing": QColor(240, 210, 60, 220),       # yellow
+    "working":     QColor(240, 160, 40, 220),        # orange
+    "responding":  QColor(60, 200, 255, 220),        # bright cyan
+}
+
+# Default icon options (Nerd Font unicode + description)
+NERD_ICON_PRESETS: list[tuple[str, str, str]] = [
+    ("\uf130", "Microphone", "U+F130"),
+    ("\uf82a", "Voice", "U+F82A"),
+    ("\uf5b7", "Robot", "U+F5B7"),
+    ("\uf718", "Thought Bubble", "U+F718"),
+    ("\ue294", "Chat Bubble", "U+E294"),
+    ("\uf809", "Chat Processing", "U+F809"),
+    ("\ufd1e", "Listening", "U+FD1E"),
+    ("\uf542", "Wave", "U+F542"),
+    ("\uf23a", "Rocket", "U+F23A"),
+    ("\ue200", "Gear", "U+E200"),
+]
+
+
+def _find_nerd_font() -> str:
+    """Return the family name of the first Nerd Font installed, or empty."""
+    from PyQt6.QtGui import QFontDatabase
+    db = QFontDatabase()
+    for fam in db.families():
+        if "nerd" in fam.lower() and "mono" in fam.lower():
+            return fam
+        if "nerd" in fam.lower() and "font" in fam.lower():
+            return fam
+    return ""
+
+
+def _nerd_font_available() -> bool:
+    global NERD_FONT_NAME, NERD_FONT_CHECKED
+    if not NERD_FONT_CHECKED:
+        NERD_FONT_NAME = _find_nerd_font()
+        NERD_FONT_CHECKED = True
+    return bool(NERD_FONT_NAME)
+
+
+def _render_tray_pixmap(glyph: str, color: QColor, size: int = 32) -> QPixmap:
+    """Render a Nerd Font glyph onto a transparent ``size×size`` pixmap.
+
+    Falls back to a filled circle if no Nerd Font is installed.
     """
-    # Generate a simple 32px coloured-circle pixmap as the icon
-    icon = QIcon()
-    pix = QPixmap(32, 32)
+    pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    outer = QColor(80, 160, 255)
-    p.setBrush(outer)
-    p.setPen(QPen(QColor(120, 200, 255, 180), 1))
-    p.drawEllipse(2, 2, 28, 28)
-    p.setBrush(QColor(160, 220, 255, 60))
-    p.setPen(Qt.PenStyle.NoPen)
-    p.drawEllipse(7, 7, 9, 9)
-    p.end()
-    icon.addPixmap(pix)
+    p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-    tray = QSystemTrayIcon(icon)
-    tray.setToolTip("Echo-Node Avatar")
+    nf = _nerd_font_available()
+    if nf:
+        font = QFont(NERD_FONT_NAME, size - 8)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        p.setFont(font)
+        p.setPen(QPen(color, 1))
+        p.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, glyph)
+    else:
+        # Fallback: draw a filled circle with inner highlight
+        col = color.toTuple()[:3]
+        inner = QColor(*col, 180)
+        p.setBrush(inner)
+        p.setPen(QPen(color.lighter(130), 1))
+        p.drawEllipse(2, 2, size - 4, size - 4)
+        p.setBrush(QColor(255, 255, 255, 40))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(size // 4, size // 4, size // 3, size // 3)
+    p.end()
+    return pix
+
+
+def _icon_set(glyph: str) -> QIcon:
+    """Build a multi-state QIcon from the single glyph."""
+    ico = QIcon()
+    for state, color in _STATE_COLORS.items():
+        pix = _render_tray_pixmap(glyph, color, 32)
+        ico.addPixmap(pix, QIcon.Mode.Normal, QIcon.State.Off if state != "idle" else QIcon.State.On)
+    return ico
+
+
+# ── Nerd Font installer (Qt dialog) ────────────────────────────────
+
+def _install_nerd_font_qt(parent: QWidget) -> None:
+    """Download and install JetBrainsMono Nerd Font into ~/.local/share/fonts."""
+    from PyQt6.QtWidgets import QMessageBox, QProgressDialog
+
+    mb = QMessageBox(parent)
+    mb.setWindowTitle("Install Nerd Font")
+    mb.setText("Echo-Node uses Nerd Font icons for the system tray.\n\n"
+               "The JetBrainsMono Nerd Font will be downloaded (≈2 MB)\n"
+               "and installed to your user font directory.\n\n"
+               "Proceed?")
+    mb.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+    if mb.exec() != QMessageBox.StandardButton.Ok:
+        return
+
+    import io, zipfile, urllib.request
+    FONT_URL = "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.3.0/JetBrainsMono.zip"
+    FONT_DIR = Path.home() / ".local" / "share" / "fonts"
+    FONT_DIR.mkdir(parents=True, exist_ok=True)
+
+    prog = QProgressDialog("Downloading Nerd Font…", "Cancel", 0, 0, parent)
+    prog.setWindowTitle("Installing")
+    prog.setMinimumDuration(0)
+    prog.show()
+
+    try:
+        resp = urllib.request.urlopen(FONT_URL, timeout=30)
+        data = resp.read()
+        if prog.wasCanceled():
+            prog.close()
+            return
+
+        prog.setLabelText("Extracting…")
+        zf = zipfile.ZipFile(io.BytesIO(data))
+        installed = 0
+        for name in zf.namelist():
+            if name.endswith(".ttf") or name.endswith(".otf"):
+                zf.extract(name, str(FONT_DIR))
+                installed += 1
+        zf.close()
+
+        # Rebuild font cache
+        import subprocess
+        subprocess.run(["fc-cache", "-f", str(FONT_DIR)], capture_output=True, timeout=30)
+
+        # Reset cached check so _nerd_font_available() re-scans
+        global NERD_FONT_CHECKED, NERD_FONT_NAME
+        NERD_FONT_CHECKED = False
+        NERD_FONT_NAME = ""
+
+        prog.close()
+        QMessageBox.information(parent, "Done",
+                                f"Installed {installed} font files.\n"
+                                "Restart Echo-Node to use Nerd Font icons.")
+    except Exception as exc:
+        prog.close()
+        QMessageBox.warning(parent, "Error", f"Font install failed:\n{exc}")
+
+
+# ── Tray icon builder ───────────────────────────────────────────────
+
+def _make_tray_icon(window: AvatarWindow, router: CommandRouter) -> tuple[QSystemTrayIcon, dict[str, Any]]:
+    """Create a system tray icon with context menu.
+
+    Returns (tray, state_ref) where state_ref is a mutable dict the caller can
+    use to update the icon dynamically via ``state_ref["glyph"]`` and
+    ``state_ref["state"]``.
+    """
+    glyph = window._tray_glyph or NERD_ICON_PRESETS[0][0]
+    ico = _icon_set(glyph)
+
+    tray = QSystemTrayIcon(ico)
+    tray.setToolTip("Echo-Node")
 
     menu = QMenu()
 
     show_action = menu.addAction("Show / Hide")
     show_action.triggered.connect(lambda: router.on_command({"cmd": "toggle"}))
 
+    # State indicator (read-only menu item, updated dynamically)
+    state_action = menu.addAction("● idle")
+    state_action.setEnabled(False)
+
+    menu.addSeparator()
+
     settings_action = menu.addAction("⚙ Settings")
     settings_action.triggered.connect(lambda: window._toggle_settings())
+
+    # Icon submenu
+    icon_menu = menu.addMenu("Tray Icon")
+    icon_group = []  # prevent GC of QActions
+    for idx, (glyph, label, codepoint) in enumerate(NERD_ICON_PRESETS):
+        preview = _render_tray_pixmap(glyph, QColor(180, 220, 255, 220), 16)
+        a = icon_menu.addAction(QIcon(preview), f"  {label}  ({codepoint})")
+        a.setCheckable(True)
+        a.setChecked(glyph == window._tray_glyph)
+        a._glyph = glyph
+        a._nf_idx = idx
+        a.triggered.connect(lambda _checked, g=glyph, nm=label: window._set_tray_glyph(g, nm))
+        icon_group.append(a)
 
     menu.addSeparator()
 
@@ -1503,6 +1683,14 @@ def _make_tray_icon(window: AvatarWindow, router: CommandRouter) -> QSystemTrayI
     for ch in window.character_list:
         a = char_menu.addAction(ch.replace("-", " ").title())
         a.triggered.connect(lambda _checked, c=ch: router.on_command({"cmd": "set_character", "name": c}))
+
+    # Nerd Font status
+    nf_avail = _nerd_font_available()
+    nf_action = menu.addAction(f"{'✓' if nf_avail else '✗'} Nerd Font")
+    nf_action.setEnabled(False)
+    if not nf_avail:
+        install_nf = menu.addAction("Install Nerd Font…")
+        install_nf.triggered.connect(lambda: _install_nerd_font_qt(window))
 
     menu.addSeparator()
 
@@ -1523,7 +1711,34 @@ def _make_tray_icon(window: AvatarWindow, router: CommandRouter) -> QSystemTrayI
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick
         else None
     )
-    return tray
+
+    state_ref: dict[str, Any] = {
+        "glyph": glyph,
+        "state": "idle",
+        "tray": tray,
+        "preview_pix": None,
+        "state_action": state_action,
+        "icon_menu": icon_menu,
+        "icon_group": icon_group,
+    }
+    return tray, state_ref
+
+
+def _update_tray_icon(state_ref: dict[str, Any], glyph: str | None = None,
+                      state: str = "idle") -> None:
+    """Call to dynamically update tray icon glyph/color without rebuilding menu."""
+    g = glyph or state_ref.get("glyph", NERD_ICON_PRESETS[0][0])
+    col = _STATE_COLORS.get(state, _STATE_COLORS["idle"])
+    pix = _render_tray_pixmap(g, col, 32)
+    ico = QIcon(pix)
+    state_ref["tray"].setIcon(ico)
+    state_ref["state"] = state
+    state_ref["glyph"] = g
+    # Update the read-only state action text
+    state_action = state_ref.get("state_action")
+    if state_action:
+        dots = {"idle": "●", "listening": "◉", "transcribing": "◔", "working": "◗", "responding": "▶"}
+        state_action.setText(f"{dots.get(state, '●')} {state}")
 
 
 # ── Entry point ──────────────────────────────────────────────────────
@@ -1577,7 +1792,12 @@ def main() -> int:
         fifo.start()
 
     # System tray icon
-    tray = _make_tray_icon(window, router)
+    tray, state_ref = _make_tray_icon(window, router)
+    window._tray_state_ref = state_ref
+    # Store glyph on each icon action for check-mark tracking
+    for a in state_ref.get("icon_group", []):
+        idx = state_ref["icon_group"].index(a)
+        a._glyph = NERD_ICON_PRESETS[idx][0]
     tray.show()
 
     return app.exec()

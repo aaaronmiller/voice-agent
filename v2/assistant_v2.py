@@ -521,7 +521,7 @@ class InterruptibleSpeaker:
         print(f"[timing] tts_warm={time.perf_counter() - started:.2f}s", flush=True)
 
     def _send_debug(self, vad_score: float, rms_val: float, state: str) -> None:
-        """Send VAD/RMS/threshold data to the avatar debug overlay."""
+        """Send VAD/RMS/threshold data to the avatar debug overlay and tray icon."""
         if self.debug_callback:
             self.debug_callback({
                 "vad": vad_score,
@@ -698,7 +698,7 @@ class InterruptibleSpeaker:
                 if self.enabled and mic is not None and time.monotonic() - started >= self.min_playback_age_seconds:
                     samples = mic.read()
                     # Debug: send VAD/RMS data to avatar overlay
-                    self._send_debug(self.vad.score(samples), rms_int16(samples), "playing")
+                    self._send_debug(self.vad.score(samples), rms_int16(samples), "responding")
                     if self._is_bargein_speech(samples, started, self.playback_start_grace_s, orig_t, orig_r):
                         if speech_started is None:
                             speech_started = time.monotonic()
@@ -1328,6 +1328,9 @@ class Assistant:
                 self.avatar._send({"cmd": "debug_update", **data})
         self.speaker.debug_callback = _debug_to_avatar
 
+        # Wire state to avatar
+        self._avatar_state = _debug_to_avatar  # reuse same callback
+
         # Exit phrases
         assistant_cfg = config.get("assistant", {})
         self.exit_phrases = {str(p).lower() for p in assistant_cfg.get("exit_phrases", [])}
@@ -1424,11 +1427,17 @@ class Assistant:
                 self.avatar.shutdown()
         return 0
 
+    def _send_state(self, state: str) -> None:
+        """Push current assistant state to avatar debug panel and tray icon."""
+        if hasattr(self, '_avatar_state') and self._avatar_state:
+            self._avatar_state({"cmd": "debug_update", "state": state})
+
     def _handle_turn(self, rec: 'TurnRecord | None' = None) -> None:
         if rec is None:
             rec = self.logger.new_turn(route="internal")
             rec.t_wake = time.perf_counter()
 
+        self._send_state("listening")
         rec.t_listen_start = time.perf_counter()
         wav_path = self.recorder.record_turn()
         rec.t_listen_done = time.perf_counter()
@@ -1438,6 +1447,7 @@ class Assistant:
             self.speaker.speak("I did not hear speech.", None, turn_rec=rec)
             return
 
+        self._send_state("transcribing")
         rec.t_stt_start = time.perf_counter()
         try:
             text = self.stt.transcribe(wav_path)
@@ -1493,6 +1503,7 @@ class Assistant:
         rec.route = route_key
         print(f"[router] {route_key} → {self.router.agents[route_key].name}", flush=True)
 
+        self._send_state("working")
         rec.t_llm_start = time.perf_counter()
         # If Hermes is available and route is hermes, use streaming integration
         if route_key == "hermes" and self.hermes and self.hermes.is_available():
@@ -1514,6 +1525,7 @@ class Assistant:
             answer = result.text
             rec.llm_model = result.model
         rec.t_llm_done = time.perf_counter()
+        self._send_state("responding")
 
         # Format for speech (only on non-streamed path; stream path already spoke)
         if route_key != "hermes" or not (self.hermes and self.hermes.is_available()):
