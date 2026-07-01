@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Launch Echo-Node voice assistant in tmux.
+# Bound to Ctrl+Shift+Q in GNOME Keyboard Shortcuts.
+#
+# Usage:
+#   echo-node-launch        — start silently (for hotkey bindings)
+#   echo-node-launch --show — start and attach to tmux (for terminal)
+#
+# Runtime stdout+stderr (incl. tracebacks) are persisted to
+# v2/logs/runtime-<timestamp>.log so an issue days later is diagnosable.
+# The tmux pane still shows live output; last 15 runtime logs are kept.
+
+set -euo pipefail
+
+ROOT="/home/misscheta/code/voice-agent/v2"
+SESSION="echo-node"
+LOG_DIR="$ROOT/logs"
+mkdir -p "$LOG_DIR"
+RUNTIME_LOG="$LOG_DIR/runtime-$(date +%Y%m%d_%H%M%S).log"
+
+# Prune old runtime logs (keep newest 15)
+ls -1t "$LOG_DIR"/runtime-*.log 2>/dev/null | tail -n +16 | xargs -r rm -f
+
+# Kill any existing session
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+pkill -f "assistant_v2.py" 2>/dev/null || true
+sleep 1
+
+# Start fresh
+cd "$ROOT"
+source "$ROOT/env.sh"
+echo_node_export_nvidia_libs "$ROOT"
+QT_QPA_PLATFORM='wayland;xcb' DISPLAY=:0 \
+  tmux new-session -d -s "$SESSION"
+
+# PYTHONUNBUFFERED=1 so log lines flush promptly; tee persists AND shows in pane.
+# `set -o pipefail` inside the pane preserves python's exit status through tee.
+tmux send-keys -t "$SESSION" \
+  "cd $ROOT && source env.sh && echo_node_export_nvidia_libs . && set -o pipefail && QT_QPA_PLATFORM='wayland;xcb' DISPLAY=:0 PYTHONUNBUFFERED=1 .venv/bin/python assistant_v2.py 2>&1 | tee -a '$RUNTIME_LOG'" Enter
+
+echo "Echo-Node starting — runtime log: $RUNTIME_LOG"
+notify-send -t 3000 "Echo-Node" "Assistant starting..." 2>/dev/null || true
+
+sleep 6
+
+notify-send -t 5000 "Echo-Node" "Assistant ready — 'echo-node-attach' to view, log: $(basename "$RUNTIME_LOG")" 2>/dev/null || true
+
+# If --show, attach to tmux
+if [[ "${1:-}" == "--show" ]]; then
+  tmux attach -t "$SESSION"
+fi
