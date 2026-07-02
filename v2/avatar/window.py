@@ -861,9 +861,12 @@ class AvatarWindow(QWidget):
         self._glow_effect.setOffset(0, 0)
         self._glow_effect.setColor(self._get_glow_color())
 
-        # Outer frame widget
+        # Outer frame widget — install event filter to forward mouse events
+        # to AvatarWindow for drag/resize (label is already transparent, but
+        # QFrame would otherwise eat the event)
         self.frame_widget = QFrame(self)
         self.frame_widget.setGraphicsEffect(self._glow_effect)
+        self.frame_widget.installEventFilter(self)
         self._apply_frame_style()
 
         # Layout inside frame
@@ -903,9 +906,11 @@ class AvatarWindow(QWidget):
 
         frame_layout.addLayout(title_bar)
 
-        # Avatar sprite
+        # Avatar sprite — transparent for mouse events so clicks pass through
+        # to AvatarWindow for dragging (the frameless window relies on manual drag)
         self.label = QLabel()
         self.label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.label.setStyleSheet("background: transparent;")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         frame_layout.addWidget(self.label, stretch=1)
@@ -1184,6 +1189,25 @@ class AvatarWindow(QWidget):
 
     def _minimize_to_tray(self) -> None:
         self.hide()
+
+    def eventFilter(self, obj: QObject, event) -> bool:
+        """Forward mouse events from child widgets to AvatarWindow handlers.
+
+        The frameless window relies on manual drag/resize in mousePress/Move/Release,
+        but child widgets (QFrame, QLabel) would otherwise consume those events.
+        Labels are set WA_TransparentForMouseEvents; the QFrame needs forwarding.
+        """
+        if obj is self.frame_widget:
+            if event.type() == event.Type.MouseButtonPress:
+                self.mousePressEvent(event)
+                return True
+            elif event.type() == event.Type.MouseMove:
+                self.mouseMoveEvent(event)
+                return True
+            elif event.type() == event.Type.MouseButtonRelease:
+                self.mouseReleaseEvent(event)
+                return True
+        return super().eventFilter(obj, event)
 
     def _edge_at(self, pos: QPointF) -> int:
         """Return bitmask of edges at the given local position."""
