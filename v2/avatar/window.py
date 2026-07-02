@@ -1571,13 +1571,18 @@ NERD_ICON_PRESETS: list[tuple[str, str, str]] = [
 
 
 def _find_nerd_font() -> str:
-    """Return the family name of the first Nerd Font installed, or empty."""
+    """Return the family name of the first Nerd Font installed, or empty.
+
+    Uses the static QFontDatabase.families() method so we don't need to
+    instantiate QFontDatabase (broken in PyQt6 6.11.0 which only exposes
+    the copy constructor).
+    """
     from PyQt6.QtGui import QFontDatabase
-    db = QFontDatabase()
-    for fam in db.families():
-        if "nerd" in fam.lower() and "mono" in fam.lower():
+    for fam in QFontDatabase.families():
+        low = fam.lower()
+        if "nerd" in low and "mono" in low:
             return fam
-        if "nerd" in fam.lower() and "font" in fam.lower():
+        if "nerd" in low and "font" in low:
             return fam
     return ""
 
