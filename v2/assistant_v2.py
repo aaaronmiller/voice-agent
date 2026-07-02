@@ -31,6 +31,7 @@ import requests
 import soundfile as sf
 import yaml
 
+from echo_node.backends import AgentBackend, create_backend, REGISTRY, BACKEND_LABELS
 from echo_node.conversation_logger import ConversationLogger, TurnRecord
 
 
@@ -1302,9 +1303,15 @@ class Assistant:
         try:
             from avatar import build as build_avatar
             self.avatar = build_avatar(config.get("avatar", {}))
+            if hasattr(self.avatar, 'on_setting'):
+                self.avatar.on_setting = self._on_setting_from_avatar
         except Exception as exc:
             print(f"[avatar] disabled: import failed: {exc}", flush=True)
             self.avatar = None
+
+        # Backend (response generation) — will be initialised after config is fully parsed
+        self._backend_provider: str = "hermes"
+        self._backend: AgentBackend | None = None
 
         # Hotkeys (must be before speaker — speaker uses hotkey for interrupt)
         self.hotkey = KeyboardHotkey(config.get("hotkeys", {}))
@@ -1369,6 +1376,47 @@ class Assistant:
 
         # Conversation logger for audit & latency analysis
         self.logger = ConversationLogger(config.get("logging", {}))
+
+        # Initialise the configured backend now that config is parsed
+        self._init_backend(config)
+
+    def _init_backend(self, config: dict[str, Any]) -> None:
+        """Create or re-create the response-generation backend."""
+        provider = str(config.get("backend", {}).get("provider", "hermes"))
+        if provider not in REGISTRY:
+            print(f"[backend] unknown provider {provider!r}, falling back to hermes", flush=True)
+            provider = "hermes"
+        self._backend_provider = provider
+        try:
+            self._backend = create_backend(provider, config)
+            avail = self._backend.is_available()
+            print(f"[backend] {provider} → {'✓' if avail else '✗'} {type(self._backend).__name__}", flush=True)
+        except Exception as exc:
+            print(f"[backend] failed to init {provider}: {exc}", flush=True)
+            self._backend = None
+
+    def _on_setting_from_avatar(self, cmd: str, kw: dict[str, Any]) -> None:
+        """Handle settings changes forwarded from the avatar window popup."""
+        if cmd == "set_backend":
+            provider = kw.get("provider", "")
+            if provider and provider != self._backend_provider and provider in REGISTRY:
+                print(f"[settings] switching backend to {provider}", flush=True)
+                self._backend_provider = provider
+                # Re-init with current config (the provider is stored in self.config)
+                self._init_backend(self.config)
+                if self._backend and not self._backend.is_available():
+                    print(f"[settings] backend {provider} is NOT available", flush=True)
+        elif cmd == "set_volume":
+            vol = kw.get("value", 1.0)
+            try:
+                import sounddevice as sd
+                sd.default.device = self.audio_config.output_device
+                os.environ["ECHO_NODE_VOLUME"] = str(vol)
+            except Exception:
+                pass
+        elif cmd == "set_silence_seconds":
+            val = kw.get("value", 0.4)
+            self.vad.silence_seconds = float(val)
 
     def run(self) -> int:
         signal.signal(signal.SIGINT, self._stop)
@@ -1498,51 +1546,69 @@ class Assistant:
             self._handle_pi_direct(query, rec)
             return
 
-        # Smart route through agent_profiles
-        route_key = self.router.classify(text)
-        rec.route = route_key
-        print(f"[router] {route_key} → {self.router.agents[route_key].name}", flush=True)
-
         self._send_state("working")
         rec.t_llm_start = time.perf_counter()
-        # If Hermes is available and route is hermes, use streaming integration
-        if route_key == "hermes" and self.hermes and self.hermes.is_available():
-            rec.llm_model = "hermes-agent"
-            system_prompt = str(self.config.get("assistant", {}).get("system_prompt", ""))
-            # Convert Hermes token stream (token, is_first) into text chunks
-            # while tracking first-token latency
+        system_prompt = str(self.config.get("assistant", {}).get("system_prompt", ""))
+
+        # Use the configured backend if available (preferred path)
+        backend: AgentBackend | None = getattr(self, '_backend', None)
+        if backend and backend.is_available():
+            rec.llm_model = self._backend_provider
+            rec.route = self._backend_provider
+            print(f"[backend] → {self._backend_provider} ({type(backend).__name__})", flush=True)
+
             def _token_to_text(stream):
                 for token, is_first in stream:
                     if is_first:
                         rec.t_llm_first_token = time.perf_counter()
                     if token:
                         yield token
-            interrupted, full_text = self.speaker.speak_stream(_token_to_text(self.hermes.chat_stream(text, system_prompt)), self.mic, turn_rec=rec)
-            answer = full_text
+            try:
+                stream = backend.chat_stream(text, system_prompt)
+                interrupted, full_text = self.speaker.speak_stream(
+                    _token_to_text(stream), self.mic, turn_rec=rec)
+                answer = full_text
+                rec.interrupted = interrupted
+            except Exception as exc:
+                print(f"[backend] stream failed: {exc}, falling back", flush=True)
+                answer = backend.chat(text, system_prompt)
+                answer = self._format_reply(answer)
+                interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+                rec.interrupted = interrupted
         else:
-            system = self.config.get("assistant", {}).get("system_prompt", "")
-            result = self.router.route(text, system)
-            answer = result.text
-            rec.llm_model = result.model
+            # Fallback: SmartRouter → Hermes / LLMRouter
+            route_key = self.router.classify(text)
+            rec.route = route_key
+            print(f"[router] {route_key} → {self.router.agents[route_key].name}", flush=True)
+
+            if route_key == "hermes" and self.hermes and self.hermes.is_available():
+                rec.llm_model = "hermes-agent"
+                def _token_to_text(stream):
+                    for token, is_first in stream:
+                        if is_first:
+                            rec.t_llm_first_token = time.perf_counter()
+                        if token:
+                            yield token
+                interrupted, full_text = self.speaker.speak_stream(
+                    _token_to_text(self.hermes.chat_stream(text, system_prompt)),
+                    self.mic, turn_rec=rec)
+                answer = full_text
+                rec.interrupted = interrupted
+            else:
+                result = self.router.route(text, system_prompt)
+                answer = result.text
+                rec.llm_model = result.model
+                answer = self._format_reply(answer)
+                interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+                rec.interrupted = interrupted
+
         rec.t_llm_done = time.perf_counter()
         self._send_state("responding")
-
-        # Format for speech (only on non-streamed path; stream path already spoke)
-        if route_key != "hermes" or not (self.hermes and self.hermes.is_available()):
-            answer = self._format_reply(answer)
-
         rec.assistant_text = answer
-        print(f"[assistant/{route_key}] {answer}", flush=True)
-
-        # Non-streamed path: speak full text
-        if route_key != "hermes" or not (self.hermes and self.hermes.is_available()):
-            interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
-            rec.interrupted = interrupted
-        else:
-            interrupted = interrupted  # already set from speak_stream
-            rec.interrupted = interrupted
+        truncated = answer[:200] + ("…" if len(answer) > 200 else "")
+        print(f"[assistant/{rec.llm_model}] {truncated}", flush=True)
         self.logger.end_turn(rec)
-        if interrupted:
+        if rec.interrupted:
             self._handle_turn(rec)
 
     def _handle_hermes_direct(self, query: str, rec: 'TurnRecord | None' = None) -> None:

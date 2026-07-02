@@ -373,8 +373,61 @@ class SettingsPopup(QFrame):
                                             self._emit("set_blink_interval", value=v / 10)))
         layout.addLayout(r5)
 
+        # ── Backend selector ──
+        sep3 = QFrame(); sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setStyleSheet("color: rgba(100,180,255,0.08);")
+        layout.addWidget(sep3)
+
+        be_row = QHBoxLayout(); be_row.setSpacing(6)
+        be_lbl = QLabel("Agent")
+        be_lbl.setFixedWidth(40)
+        be_row.addWidget(be_lbl)
+        self.backend_combo = QComboBox()
+        self.backend_combo.setMinimumWidth(160)
+        layout.addLayout(be_row)
+        # Options will be populated from _on_setting_change or stored in parent
+        # We store them as a class-level attribute on SettingsPopup
+        if hasattr(SettingsPopup, '_backend_options'):
+            for key, label, gly in SettingsPopup._backend_options:
+                self.backend_combo.addItem(f"{gly}  {label}", key)
+        self.backend_combo.currentIndexChanged.connect(self._on_backend)
+        be_row.addWidget(self.backend_combo, stretch=1)
+        # Availability indicator
+        self.backend_status = QLabel()
+        self.backend_status.setFixedWidth(20)
+        be_row.addWidget(self.backend_status)
+
         self.setLayout(layout)
         self.adjustSize()
+
+    def _on_backend(self, idx: int) -> None:
+        key = self.backend_combo.itemData(idx)
+        if not key:
+            return
+        # Check availability
+        avail = self._check_backend_available(key)
+        self.backend_status.setText("✓" if avail else "✗")
+        self.backend_status.setStyleSheet(
+            "color: #4c4;" if avail else "color: #c44;"
+        )
+        self._emit("set_backend", provider=key)
+        # Disable the done button after switching backends so user
+        # can re-enable if the backend fails
+        # (no done button in this design, so just emit)
+
+    @staticmethod
+    def _check_backend_available(provider: str) -> bool:
+        try:
+            from echo_node.backends import check_backend_availability
+            # We don't have the full config here, but we can do basic checks
+            return check_backend_availability(provider, {})
+        except Exception:
+            return False
+
+    @staticmethod
+    def set_backend_options(options: list[tuple[str, str, str]]) -> None:
+        SettingsPopup._backend_options = options
+        SettingsPopup._backend_default = options[0][0] if options else "hermes"
 
     # -- helpers: slider builders -------------------------------------------
 
@@ -1256,6 +1309,9 @@ class AvatarWindow(QWidget):
         elif cmd == "set_blink_interval":
             self._blink_interval = float(payload.get("value", IDLE_BLINK_PERIOD_S))
             self._restart_idle_blink()
+        elif cmd == "set_backend":
+            # Forward to the assistant via stdout (controller reads it)
+            print(json.dumps(payload), flush=True)
 
     def _restart_idle_blink(self) -> None:
         self._idle_blink.stop()
@@ -1772,6 +1828,14 @@ def main() -> int:
 
     window = AvatarWindow(base / "frames", manifest, default_character)
     window.show()
+
+    # Set backend options on the SettingsPopup class so all future
+    # SettingsPopup instances show the right choices.
+    try:
+        from echo_node.backends import BACKEND_OPTIONS
+        SettingsPopup.set_backend_options(BACKEND_OPTIONS)
+    except ImportError:
+        pass
 
     router = CommandRouter(window)
 
