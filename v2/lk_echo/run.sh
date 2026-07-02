@@ -40,8 +40,8 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux kill-session -t "$SESSION"
   sleep 1
 fi
-pkill -f "livekit/agent.py" 2>/dev/null || true
-pkill -f "livekit/client.py" 2>/dev/null || true
+pkill -f "lk_echo/agent.py" 2>/dev/null || true
+pkill -f "lk_echo/client.py" 2>/dev/null || true
 pkill -f "lk-server" 2>/dev/null || true
 sleep 1
 
@@ -58,12 +58,12 @@ tmux new-session -d -s "$SESSION" -n "lk-server" \
 sleep 2
 
 tmux new-window -t "$SESSION" -n "agent" \
-  "cd '$ROOT' && source env.sh 2>/dev/null; .venv/bin/python -m livekit.agent 2>&1 | tee '$LOG_DIR/agent.log'"
+  "cd '$ROOT' && source env.sh 2>/dev/null; .venv/bin/python -m lk_echo.agent 2>&1 | tee '$LOG_DIR/agent.log'"
 
 sleep 3
 
 tmux new-window -t "$SESSION" -n "client" \
-  "cd '$ROOT' && source env.sh 2>/dev/null; .venv/bin/python -m livekit.client 2>&1 | tee '$LOG_DIR/client.log'"
+  "cd '$ROOT' && source env.sh 2>/dev/null; .venv/bin/python -m lk_echo.client 2>&1 | tee '$LOG_DIR/client.log'"
 
 echo "Echo-Node LiveKit started"
 echo "  tmux attach -t $SESSION"
