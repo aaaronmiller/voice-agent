@@ -41,3 +41,4 @@ v2/models/
 v2/vendor/rhubarb/rhubarb
 v2/vendor/lk-server
 v2/lk_echo/.env
+v2/lk_google/.env
