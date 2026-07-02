@@ -1,0 +1,275 @@
+# ── Echo-Node Incarnation Configuration ──────────────────────────
+# Which incarnation is active (0=Original, 1=LiveKit, 2=Gemini, -1=none)
+active: 2
+
+incarnations:
+
+  # ═══════════════════════════════════════════════════════════════
+  # 0: Original v2
+  # ═══════════════════════════════════════════════════════════════
+  - name: "🎙️ Original v2"
+    description: "Whisper STT → Hermes Agent → Kokoro TTS + Rhubarb lip-sync"
+    command:
+      linux: "bash -c 'cd ${CWD} && source env.sh 2>/dev/null; source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py'"
+      macos: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py --macos'"
+      wsl: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py --config config.wsl.yaml'"
+    cwd: "."
+    log_file: "logs/assistant.log"
+
+    settings:
+      # ── Backend ──
+      backend.provider:
+        label: "Backend Provider"
+        type: dropdown
+        options: ["hermes", "pi", "claude-code", "codex", "openai", "openrouter"]
+        default: "hermes"
+        description: "Which AI backend to use for responses"
+      backend.api_key:
+        label: "Backend API Key"
+        type: password
+        default: ""
+        description: "API key for your chosen backend"
+      backend.model:
+        label: "Backend Model"
+        type: text
+        default: ""
+        description: "Model name (e.g., deepseek-v4-flash-free)"
+      backend.timeout:
+        label: "Backend Timeout (s)"
+        type: number
+        default: 30
+        description: "Max seconds to wait for backend response"
+
+      # ── TTS ──
+      tts.provider:
+        label: "TTS Engine"
+        type: dropdown
+        options: ["kokoro", "dots", "espeak"]
+        default: "kokoro"
+        description: "Text-to-speech engine"
+      tts.speed:
+        label: "TTS Speed"
+        type: range
+        min: 0.5
+        max: 2.0
+        step: 0.05
+        default: 1.35
+        description: "Speech rate multiplier"
+
+      # ── STT ──
+      stt.model:
+        label: "STT Model"
+        type: dropdown
+        options: ["faster-whisper", "parakeet"]
+        default: "faster-whisper"
+        description: "Speech-to-text model"
+
+      # ── VAD ──
+      vad.threshold:
+        label: "VAD Threshold"
+        type: range
+        min: 0.0
+        max: 1.0
+        step: 0.01
+        default: 0.40
+        description: "Voice activity detection sensitivity"
+      vad.silence_seconds:
+        label: "Silence Timeout (s)"
+        type: number
+        default: 0.4
+        description: "Seconds of silence before end-of-speech"
+      vad.max_record:
+        label: "Max Record (s)"
+        type: number
+        default: 10
+        description: "Max recording duration per turn"
+
+      # ── Audio ──
+      audio.input:
+        label: "Input Device"
+        type: text
+        default: "default"
+        description: "ALSA/PulseAudio input device"
+      audio.output:
+        label: "Output Device"
+        type: text
+        default: "default"
+        description: "ALSA/PulseAudio output device"
+
+      # ── Avatar ──
+      avatar.character:
+        label: "Character"
+        type: text
+        default: "raccoon-hacker"
+        description: "Character name from avatar/chara/"
+      avatar.frame:
+        label: "Frame Shape"
+        type: dropdown
+        options: ["rounded", "square", "circle"]
+        default: "rounded"
+        description: "Avatar window shape"
+      avatar.hue:
+        label: "Hue"
+        type: range
+        min: 0
+        max: 360
+        default: 200
+        description: "HSL hue (0-360)"
+      avatar.saturation:
+        label: "Saturation"
+        type: range
+        min: 0
+        max: 100
+        default: 70
+        description: "HSL saturation (0-100)"
+      avatar.lightness:
+        label: "Lightness"
+        type: range
+        min: 5
+        max: 95
+        default: 45
+        description: "HSL lightness (0-100)"
+
+      # ── Barge-in ──
+      barge_in.enabled:
+        label: "Barge-in"
+        type: boolean
+        default: true
+        description: "Allow interruption during playback"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 1: LiveKit Cloud + LemonSlice
+  # ═══════════════════════════════════════════════════════════════
+  - name: "🎬 LiveKit Cloud"
+    description: "LiveKit Cloud inference + LemonSlice photorealistic avatar"
+    command:
+      linux: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python -m lk_echo.agent_lemonslice start'"
+      macos: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python -m lk_echo.agent_lemonslice start'"
+    cwd: "."
+    log_file: "logs/lk-cloud.log"
+
+    settings:
+      # ── LiveKit Cloud ──
+      livekit.url:
+        label: "LiveKit URL"
+        type: text
+        default: "wss://miss-cheta-hr3obtce.livekit.cloud"
+        description: "Your LiveKit Cloud WebSocket endpoint"
+      livekit.api_key:
+        label: "LiveKit API Key"
+        type: password
+        default: ""
+        description: "LiveKit Cloud project API key"
+      livekit.api_secret:
+        label: "LiveKit API Secret"
+        type: password
+        default: ""
+        description: "LiveKit Cloud project API secret"
+
+      # ── LemonSlice ──
+      lemonslice.api_key:
+        label: "LemonSlice API Key"
+        type: password
+        default: ""
+        description: "LemonSlice avatar API key (lemonslice.com)"
+      lemonslice.image_url:
+        label: "Avatar Image URL"
+        type: text
+        default: ""
+        description: "Public URL for avatar source image"
+
+      # ── Agent ──
+      agent.name:
+        label: "Agent Name"
+        type: text
+        default: "lemonslice-echo-node"
+        description: "LiveKit agent name for room dispatching"
+      agent.model:
+        label: "LLM Model"
+        type: text
+        default: ""
+        description: "LLM model (empty for default)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 2: Google Gemini
+  # ═══════════════════════════════════════════════════════════════
+  - name: "🧠 Google Gemini"
+    description: "Gemini Multimodal Live API + Hermes MCP tools + cost tracking"
+    command:
+      linux: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python -m livekit.agents start --url ${LIVEKIT_URL} --api-key ${LIVEKIT_API_KEY} --api-secret ${LIVEKIT_API_SECRET} lk_google/agent.py'"
+      macos: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python -m livekit.agents start --url ${LIVEKIT_URL} --api-key ${LIVEKIT_API_KEY} --api-secret ${LIVEKIT_API_SECRET} lk_google/agent.py'"
+    cwd: "."
+    log_file: "logs/gemini-agent.log"
+
+    settings:
+      # ── Gemini ──
+      gemini.api_key:
+        label: "Gemini API Key"
+        type: password
+        default: ""
+        description: "GOOGLE_API_KEY for Gemini Multimodal Live API"
+      gemini.model:
+        label: "Gemini Model"
+        type: dropdown
+        options: ["gemini-2.5-flash-native-audio-preview-12-2025", "gemini-3.1-flash-live-preview"]
+        default: "gemini-2.5-flash-native-audio-preview-12-2025"
+        description: "Gemini Live API model"
+      gemini.voice:
+        label: "Voice"
+        type: dropdown
+        options: ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
+        default: "Puck"
+        description: "Gemini voice name"
+
+      # ── Hermes MCP ──
+      hermes.url:
+        label: "Hermes URL"
+        type: text
+        default: "http://127.0.0.1:8642"
+        description: "Hermes Agent API endpoint"
+      hermes.api_key:
+        label: "Hermes API Key"
+        type: password
+        default: "pass"
+        description: "Hermes Agent API key"
+      hermes.timeout:
+        label: "Hermes Timeout (s)"
+        type: number
+        default: 30
+        description: "Max seconds for Hermes tool calls"
+
+      # ── LiveKit ──
+      livekit.url:
+        label: "LiveKit URL"
+        type: text
+        default: "ws://127.0.0.1:7880"
+        description: "Self-hosted lk-server WebSocket URL"
+      livekit.api_key:
+        label: "LiveKit API Key"
+        type: text
+        default: "devkey"
+        description: "lk-server API key"
+      livekit.api_secret:
+        label: "LiveKit Secret"
+        type: password
+        default: "secret"
+        description: "lk-server API secret"
+
+      # ── LemonSlice (optional) ──
+      lemonslice.api_key:
+        label: "LemonSlice API Key"
+        type: password
+        default: ""
+        description: "LemonSlice avatar API key (optional)"
+      lemonslice.image_url:
+        label: "Avatar Image URL"
+        type: text
+        default: ""
+        description: "Public URL for avatar image"
+
+      # ── Cost tracking ──
+      cost.log_dir:
+        label: "Log Directory"
+        type: text
+        default: "logs"
+        description: "Where cost JSONL logs are stored"

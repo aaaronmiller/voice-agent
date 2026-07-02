@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Echo-Node Launcher — unified chooser for all voice agent modes.
+
+Quick commands:
+  echo-node                    # launch the GUI chooser
+  echo-node --list             # list incarnations
+  echo-node --start 2          # start Google Gemini
+  echo-node --stop             # stop whatever is running
+  echo-node --status           # check what's running
+"""
+
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from incarnations.chooser import _cli_main
+
+_cli_main()
