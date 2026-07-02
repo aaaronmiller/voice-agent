@@ -1,8 +1,8 @@
 """Echo-Node LemonSlice Agent — LiveKit voice pipeline + LemonSlice avatar.
 
-Connects to the local LiveKit server, runs a voice pipeline using direct
-plugins (Deepgram STT, OpenAI/OpenRouter LLM, OpenAI TTS), and generates
-a real-time video avatar via LemonSlice.
+Uses LiveKit Cloud inference (inference.LLM/STT/TTS) which routes through
+LiveKit's Agent Gateway — so you only need LIVEKIT_API_KEY + LIVEKIT_API_SECRET
+for all STT/LLM/TTS, no separate OpenAI/Deepgram/ElevenLabs keys required.
 
 The avatar joins the room as a separate participant with identity
 "lemonslice-avatar-agent" and publishes a video+audio track of the talking face.
@@ -12,12 +12,13 @@ Run:
   python -m lk_echo.agent_lemonslice start   # production
 
 Environment:
-  LEMONSLICE_API_KEY  (required)
-  DEEPGRAM_API_KEY    (required)
-  OPENAI_API_KEY      (required for LLM + TTS, or set LLM_BASE_URL for OpenRouter)
-  LLM_BASE_URL        (optional — use OpenRouter/compatible endpoint instead of OpenAI)
-  LLM_API_KEY         (optional — for custom LLM endpoint)
-  LLM_MODEL           (optional — default: openai/gpt-4o-mini or anthropic/claude-3-haiku)
+  LEMONSLICE_API_KEY     (required — avatar rendering)
+  LIVEKIT_API_KEY        (required — LiveKit Cloud for inference + WebRTC)
+  LIVEKIT_API_SECRET     (required — LiveKit Cloud)
+  LIVEKIT_URL            (required — LiveKit Cloud WebRTC endpoint, e.g. wss://my-project.livekit.cloud)
+  AGENT_NAME             (optional — default: lemonslice-echo-node)
+
+For local dev without LiveKit Cloud, see agent_lemonslice_local.py instead.
 """
 
 from __future__ import annotations
@@ -29,20 +30,16 @@ import sys
 
 from dotenv import load_dotenv
 
-from livekit import agents, rtc
+from livekit import agents
 from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
-    AutoSubscribe,
-    JobContext,
-    RunContext,
     TurnHandlingOptions,
-    function_tool,
+    inference,
     room_io,
 )
-from livekit.agents.llm import FunctionContext
-from livekit.plugins import deepgram, lemonslice, openai
+from livekit.plugins import lemonslice
 
 # ── Paths & env ────────────────────────────────────────────────────
 
@@ -64,6 +61,23 @@ if not LEMONSLICE_API_KEY:
     print("Get one at https://lemonslice.com", file=sys.stderr)
     sys.exit(1)
 
+LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
+if not LIVEKIT_API_KEY:
+    print("ERROR: LIVEKIT_API_KEY must be set", file=sys.stderr)
+    print("Get LiveKit Cloud credentials at https://livekit.io", file=sys.stderr)
+    sys.exit(1)
+
+LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
+if not LIVEKIT_API_SECRET:
+    print("ERROR: LIVEKIT_API_SECRET must be set", file=sys.stderr)
+    sys.exit(1)
+
+LIVEKIT_URL = os.getenv("LIVEKIT_URL")
+if not LIVEKIT_URL:
+    print("ERROR: LIVEKIT_URL must be set", file=sys.stderr)
+    print("e.g. wss://my-project.livekit.cloud", file=sys.stderr)
+    sys.exit(1)
+
 AGENT_NAME = os.getenv("AGENT_NAME", "lemonslice-echo-node")
 
 # Avatar appearance — must be a publicly reachable URL (LemonSlice servers fetch it)
@@ -72,24 +86,6 @@ AVATAR_IMAGE_URL = os.getenv(
     "https://6ammc3n5zzf5ljnz.public.blob.vercel-storage.com/"
     "inf2-uploads/image_9d0f6-WhaKqLKTzfVHlfe5jXzHE8Rpi9peF4.jpg",
 )
-
-# ── API keys sanity checks ─────────────────────────────────────────
-
-DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
-LLM_API_KEY = os.getenv("LLM_API_KEY") or OPENAI_API_KEY
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
-TTS_API_KEY = os.getenv("TTS_API_KEY") or OPENAI_API_KEY
-
-if not DEEPGRAM_API_KEY:
-    print("ERROR: DEEPGRAM_API_KEY must be set for STT", file=sys.stderr)
-    sys.exit(1)
-
-if not LLM_API_KEY or LLM_API_KEY == "dummy":
-    print("ERROR: No valid API key for LLM/TTS", file=sys.stderr)
-    print("Set OPENAI_API_KEY or LLM_API_KEY", file=sys.stderr)
-    sys.exit(1)
 
 # ── Instructions ───────────────────────────────────────────────────
 
@@ -122,25 +118,6 @@ class JessAgent(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=ASSISTANT_INSTRUCTIONS)
 
-    @function_tool
-    async def search_web(self, ctx: RunContext, query: str) -> str:
-        """Search the web. Use when the user asks about current events."""
-        import subprocess
-        try:
-            result = subprocess.run(
-                ["firecrawl", "search", query],
-                capture_output=True, text=True, timeout=30,
-            )
-            return (result.stdout or result.stderr or "No results")[:2000]
-        except Exception as e:
-            return f"Search failed: {e}"
-
-    @function_tool
-    async def get_time(self, ctx: RunContext) -> str:
-        """Get the current date and time."""
-        import time
-        return time.strftime("%A, %B %d, %Y at %I:%M %p")
-
 
 # ── Server ─────────────────────────────────────────────────────────
 
@@ -148,38 +125,24 @@ server = AgentServer()
 
 
 @server.rtc_session(agent_name=AGENT_NAME)
-async def echo_node_session(ctx: JobContext) -> None:
+async def echo_node_session(ctx: agents.JobContext) -> None:
     logger.info(f"Session starting in room: {ctx.room.name}")
 
-    # ── LLM: OpenAI or OpenRouter ──
-    llm_kwargs = {"model": LLM_MODEL}
-    if LLM_BASE_URL:
-        llm_kwargs["base_url"] = LLM_BASE_URL
-    if LLM_API_KEY:
-        llm_kwargs["api_key"] = LLM_API_KEY
+    # ── Session with LiveKit Cloud inference ────────────────────
+    # These inference.* wrappers go through LiveKit's Agent Gateway
+    # (agent-gateway.livekit.cloud). LiveKit handles all provider
+    # API keys server-side — you just need LIVEKIT_API_KEY/SECRET.
+    #
+    # Models available: https://docs.livekit.io/agents/models/
 
-    llm = openai.LLM(**llm_kwargs)
-    logger.info(f"LLM: {LLM_MODEL}" + (f" @ {LLM_BASE_URL}" if LLM_BASE_URL else ""))
-
-    # ── STT: Deepgram ──
-    stt = deepgram.STT(model="nova-3", language="en", api_key=DEEPGRAM_API_KEY)
-    logger.info("STT: Deepgram Nova-3")
-
-    # ── TTS: OpenAI ──
-    tts_kwargs = {"model": "tts-1", "voice": "alloy"}
-    if LLM_BASE_URL:
-        # If using custom base URL for LLM, TTS might need different endpoint
-        pass
-    if TTS_API_KEY:
-        tts_kwargs["api_key"] = TTS_API_KEY
-    tts = openai.TTS(**tts_kwargs)
-    logger.info(f"TTS: OpenAI tts-1 (voice: alloy)")
-
-    # ── Session ──
     session = AgentSession(
-        llm=llm,
-        stt=stt,
-        tts=tts,
+        llm=inference.LLM(model="openai/gpt-4o-mini"),
+        stt=inference.STT(model="deepgram/nova-3", language="en"),
+        tts=inference.TTS(
+            model="openai/tts-1",
+            voice="alloy",
+            language="en",
+        ),
         turn_handling=TurnHandlingOptions(
             interruption={"resume_false_interruption": True},
             preemptive_generation={"enabled": True, "max_retries": 3},
@@ -188,33 +151,39 @@ async def echo_node_session(ctx: JobContext) -> None:
         max_endpointing_delay=2.0,
     )
 
-    # Connect to room
+    logger.info("LLM: OpenAI gpt-4o-mini (via LiveKit Cloud)")
+    logger.info("STT: Deepgram Nova-3 (via LiveKit Cloud)")
+    logger.info("TTS: OpenAI tts-1, voice: alloy (via LiveKit Cloud)")
+
+    # Connect to the LiveKit room
     await ctx.connect()
 
-    # LemonSlice avatar
+    # Create the LemonSlice avatar session
     avatar = lemonslice.AvatarSession(
         agent_image_url=AVATAR_IMAGE_URL,
         agent_prompt="A person talking naturally with varied facial expressions.",
         api_key=LEMONSLICE_API_KEY,
     )
 
+    # Start the avatar — tells LemonSlice to join the room as a
+    # separate participant publishing a video track of the talking face.
     session_id = await avatar.start(session, room=ctx.room)
     logger.info(f"LemonSlice session started: {session_id}")
 
-    # Start voice agent
+    # Start the voice agent
     await session.start(
         room=ctx.room,
         agent=JessAgent(),
     )
 
-    # Wait for avatar to be ready
+    # Wait for the avatar to join the room
     try:
         await avatar.wait_for_join()
         logger.info("Avatar ready — Jess is online")
     except Exception as e:
         logger.warning(f"Avatar join wait: {e}")
 
-    # Greeting
+    # Generate initial greeting
     await session.generate_reply(
         instructions="Greet the user warmly. Introduce yourself as Jess."
     )
