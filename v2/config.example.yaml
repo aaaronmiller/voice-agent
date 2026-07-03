@@ -1,3 +1,17 @@
+# ── Provider-agnostic overrides ─────────────────────────────────────────────
+# Every provider/model below can be overridden at runtime by an env var (env
+# wins over this file), so LLM/STT/TTS are swappable without editing config:
+#   ECHO_LLM_PROVIDER   ECHO_LLM_MODEL   ECHO_LLM_BASE_URL   ECHO_LLM_API_KEY
+#   ECHO_STT_PROVIDER   ECHO_STT_MODEL
+#   ECHO_TTS_PROVIDER   ECHO_TTS_VOICE
+#   ECHO_WAKE_PHRASE
+# Examples:
+#   ECHO_LLM_PROVIDER=hermes ECHO_LLM_BASE_URL=http://127.0.0.1:8642/v1 ECHO_LLM_MODEL=hermes-agent
+#   ECHO_LLM_PROVIDER=ollama ECHO_LLM_MODEL=qwen3:4b
+#   ECHO_STT_PROVIDER=faster-whisper ECHO_STT_MODEL=small
+#   ECHO_TTS_PROVIDER=kokoro ECHO_TTS_VOICE=af_sky
+# Secrets belong in v2/.env (gitignored), not here.
+# ─────────────────────────────────────────────────────────────────────────────
 assistant:
   name: "Echo Node"
   wake_phrase: "hey rhasspy"

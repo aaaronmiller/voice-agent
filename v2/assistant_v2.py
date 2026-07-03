@@ -62,10 +62,50 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _apply_env_overrides(config: dict[str, Any]) -> None:
+    """Let env vars override config for provider/model selection, so the LLM,
+    STT and TTS backends are all adjustable without editing config.yaml.
+
+    Env always wins over the file; empty/unset vars are ignored. This only
+    remaps values into the existing config sections — the provider dispatch
+    (LLMRouter / STT factory / TTS factory) is unchanged.
+    """
+    # env var -> list of (section, key) targets it writes to
+    mapping: dict[str, list[tuple[str, str]]] = {
+        # LLM
+        "ECHO_LLM_PROVIDER": [("llm", "provider")],
+        "ECHO_LLM_MODEL": [("llm", "model")],
+        "ECHO_LLM_BASE_URL": [("llm", "base_url")],
+        "ECHO_LLM_API_KEY": [("llm", "api_key")],
+        # STT (model_name is parakeet/onnx-asr, model is faster-whisper)
+        "ECHO_STT_PROVIDER": [("stt", "provider")],
+        "ECHO_STT_MODEL": [("stt", "model_name"), ("stt", "model")],
+        # TTS (voice is kokoro/dots, espeak_voice is espeak-ng)
+        "ECHO_TTS_PROVIDER": [("tts", "provider")],
+        "ECHO_TTS_VOICE": [("tts", "voice"), ("tts", "espeak_voice")],
+        # Wake word
+        "ECHO_WAKE_PHRASE": [("assistant", "wake_phrase")],
+    }
+    applied: list[str] = []
+    for env_key, targets in mapping.items():
+        val = os.environ.get(env_key)
+        if not val:
+            continue
+        for section, key in targets:
+            sec = config.setdefault(section, {})
+            if isinstance(sec, dict):
+                sec[key] = val
+        applied.append(f"{env_key}->{'***' if 'API_KEY' in env_key else val}")
+    if applied:
+        print(f"[config] env overrides applied: {', '.join(applied)}", flush=True)
+
+
 def load_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"{path} does not exist. Run ./setup.sh first.")
-    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    _apply_env_overrides(config)
+    return config
 
 
 # ── Utilities ───────────────────────────────────────────────────────

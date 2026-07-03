@@ -115,6 +115,22 @@ backend URL, model name, wake-word model file, TTS voice, silence detection,
 barge-in, hotkeys, WSL2 audio, Windows audio, voice audition, and custom
 wake-word sample recording.
 
+### Provider-agnostic (env or config)
+
+The LLM, STT, and TTS backends are all selectable in `config.yaml` **or** via env
+vars (env wins over the file — no config edit needed to swap):
+
+| Env var | Overrides | Example |
+|---|---|---|
+| `ECHO_LLM_PROVIDER` / `ECHO_LLM_MODEL` / `ECHO_LLM_BASE_URL` / `ECHO_LLM_API_KEY` | `llm.*` | `ECHO_LLM_PROVIDER=hermes ECHO_LLM_BASE_URL=http://127.0.0.1:8642/v1 ECHO_LLM_MODEL=hermes-agent` |
+| `ECHO_STT_PROVIDER` / `ECHO_STT_MODEL` | `stt.*` | `ECHO_STT_PROVIDER=faster-whisper ECHO_STT_MODEL=small` |
+| `ECHO_TTS_PROVIDER` / `ECHO_TTS_VOICE` | `tts.*` | `ECHO_TTS_PROVIDER=kokoro ECHO_TTS_VOICE=af_sky` |
+| `ECHO_WAKE_PHRASE` | `assistant.wake_phrase` | `ECHO_WAKE_PHRASE=computer` |
+
+LLM providers: `hermes`, `openai-compatible`, `ollama`, `odysseus`. STT: `faster-whisper`,
+`onnx-asr`/`parakeet`. TTS: `kokoro`, `dots`, `espeak-ng`. Put secrets in `v2/.env`
+(gitignored). Applied overrides are printed at startup as `[config] env overrides applied: …`.
+
 See [docs/avatar.md](docs/avatar.md) for the optional floating animated
 avatar (PyQt6 sidecar with Rhubarb lip-sync) and how to add new sprite sheets.
 
