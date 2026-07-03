@@ -269,6 +269,9 @@ class _DebugPanel(QWidget):
     _DIM_GREEN = QColor(60, 220, 100, 100)
     _DIM_YELLOW = QColor(240, 210, 60, 100)
     _DIM_RED = QColor(240, 80, 60, 100)
+    _GREEN_LIGHT = QColor(60, 220, 100, 180)
+    _YELLOW_LIGHT = QColor(240, 210, 60, 180)
+    _RED_LIGHT = QColor(240, 80, 60, 180)
 
     def __init__(self, data_ref: dict[str, float],
                  history_ref: list[float]):
@@ -319,138 +322,116 @@ class _DebugPanel(QWidget):
         state = d.get("state", "idle")
         max_rms = max(2000, boosted_rms * 2)
 
-        m = 4  # margin
-        bar_w = 80  # width of VAD + RMS bars combined
+        m = 2          # margin
+        info_h = 14    # height of stats bar at top
         bar_h = h - m * 2 - 2
-        label_h = 10
-        wave_x = m + bar_w + 6
-        wave_w = w - wave_x - m
-        wave_h = bar_h
-        wave_y = m
+        wave_h = bar_h - info_h - 2  # waveform fills everything below stats
+        wave_y = m + info_h + 2
+        wave_x = m
+        wave_w = w - m * 2
 
-        # ── Font for labels ──
-        font = QFont("monospace", 8)
-        painter.setFont(font)
+        font_tiny = QFont("monospace", 7)
+        font_bold = QFont("monospace", 7)
+        font_bold.setBold(True)
 
-        # ── VAD bar (left side of bar section) ──
-        vx = m
-        vw = (bar_w - 4) // 2
-        # Background track
-        painter.setBrush(QColor(20, 22, 40, 180))
-        painter.drawRoundedRect(vx, m, vw, bar_h, 3, 3)
+        # ── Top stats bar (compact, full-width) ──
+        painter.setFont(font_tiny)
+        painter.setPen(QColor(140, 170, 220, 200))
 
-        # Threshold line
-        ty = m + int(bar_h * (1.0 - threshold))
-        painter.setPen(QPen(self._GREEN, 1))
-        painter.drawLine(vx, ty, vx + vw, ty)
-        painter.setPen(QColor(100, 255, 100, 100))
-        painter.drawText(vx + 2, ty - 2, f"T{threshold:.2f}")
-
-        # Boosted threshold
-        by = m + int(bar_h * (1.0 - min(1.0, boosted)))
-        painter.setPen(QPen(self._YELLOW, 1))
-        painter.drawLine(vx, by, vx + vw, by)
-        painter.setPen(QColor(255, 200, 80, 100))
-        painter.drawText(vx + 2, by - 2, f"B{boosted:.2f}")
-
-        # VAD fill
-        fill_h = max(2, int(bar_h * vad))
-        fill_y = m + bar_h - fill_h
-        vad_color = QColor(80, 200, 255, 200)
+        # Stats: VAD score with color, RMS with floor, state
+        vad_str = f"VAD {vad:.2f}"
         if vad >= boosted:
-            vad_color = self._RED
+            painter.setPen(QPen(self._RED_LIGHT, 1))
         elif vad >= threshold:
-            vad_color = self._YELLOW
-        painter.setBrush(vad_color)
-        painter.drawRoundedRect(vx + 1, fill_y, vw - 2, fill_h, 2, 2)
+            painter.setPen(QPen(self._YELLOW_LIGHT, 1))
+        else:
+            painter.setPen(QPen(self._GREEN_LIGHT, 1))
+        painter.drawText(m + 2, m + info_h - 2, vad_str)
 
-        # VAD label
-        painter.setPen(QColor(180, 220, 255, 200))
-        painter.drawText(vx + 2, m + bar_h + label_h, f"V{vad:.2f}")
+        rms_str = f"RMS {rms:.0f} F{rms_floor:.0f}"
+        painter.setPen(QColor(140, 170, 220, 200))
+        painter.drawText(m + 70, m + info_h - 2, rms_str)
 
-        # ── RMS bar ──
-        rx = vx + vw + 4
-        rw = vw
-        painter.setBrush(QColor(20, 22, 40, 180))
-        painter.drawRoundedRect(rx, m, rw, bar_h, 3, 3)
+        painter.setFont(font_bold)
+        state_colors = {
+            "idle": QColor(80, 160, 255, 160),
+            "listening": QColor(60, 220, 120, 200),
+            "transcribing": QColor(240, 210, 60, 200),
+            "working": QColor(240, 160, 40, 200),
+            "responding": QColor(60, 200, 255, 200),
+        }
+        painter.setPen(state_colors.get(state, QColor(100, 100, 140, 160)))
+        painter.drawText(wave_x + wave_w - 60, m + info_h - 2, state.upper())
 
-        # RMS floor line
-        rfy = m + int(bar_h * (1.0 - min(1.0, rms_floor / max_rms)))
-        painter.setPen(QPen(self._GREEN, 1))
-        painter.drawLine(rx, rfy, rx + rw, rfy)
-        painter.setPen(QColor(100, 255, 100, 100))
-        painter.drawText(rx + 2, rfy - 2, f"R{rms_floor:.0f}")
-
-        # Boosted RMS line
-        brfy = m + int(bar_h * (1.0 - min(1.0, boosted_rms / max_rms)))
-        painter.setPen(QPen(self._YELLOW, 1))
-        painter.drawLine(rx, brfy, rx + rw, brfy)
-        painter.setPen(QColor(255, 200, 80, 100))
-        painter.drawText(rx + 2, brfy - 2, f"BR{boosted_rms:.0f}")
-
-        # RMS fill
-        rms_norm = min(1.0, rms / max_rms)
-        rfill_h = max(2, int(bar_h * rms_norm))
-        rfill_y = m + bar_h - rfill_h
-        rms_color = QColor(80, 200, 255, 200)
-        if rms >= boosted_rms:
-            rms_color = self._RED
-        elif rms >= rms_floor:
-            rms_color = self._YELLOW
-        painter.setBrush(rms_color)
-        painter.drawRoundedRect(rx + 1, rfill_y, rw - 2, rfill_h, 2, 2)
-
-        # RMS label
-        painter.setPen(QColor(180, 220, 255, 200))
-        painter.drawText(rx + 2, m + bar_h + label_h, f"R{rms:.0f}")
-
-        # ── State label (top-right of bar area) ──
-        painter.setPen(QColor(255, 255, 255, 160))
-        font_b = QFont("monospace", 8)
-        font_b.setBold(True)
-        painter.setFont(font_b)
-        painter.drawText(rx + rw - 50, m + label_h, state.upper())
-
-        # ── Scrolling waveform (full right area) ──
-        painter.setFont(font)
+        # ── Waveform area ──
         if wave_w > 10 and len(self._history) > 1:
             hist = self._history[-self._max_history:]
             n = len(hist)
-            step_x = wave_w / n if n > 0 else 1.0
+            if n > 1:
+                step_x = wave_w / (n - 1)
+                mid_y = wave_y + wave_h / 2
 
-            # Draw zero line
-            zero_y = wave_y + wave_h
-            painter.setPen(QPen(QColor(60, 80, 140, 80), 1))
-            painter.drawLine(wave_x, zero_y, wave_x + wave_w, zero_y)
+                # Grid lines (subtle)
+                painter.setPen(QPen(QColor(60, 80, 140, 20), 1))
+                for gx in range(int(wave_x) + 20, int(wave_x + wave_w), 20):
+                    painter.drawLine(gx, wave_y, gx, wave_y + wave_h)
+                painter.setPen(QPen(QColor(60, 80, 140, 25), 1))
+                gy = mid_y
+                painter.drawLine(wave_x, gy, wave_x + wave_w, gy)
+                for gy in (wave_y + wave_h // 4, wave_y + 3 * wave_h // 4):
+                    painter.drawLine(wave_x, gy, wave_x + wave_w, gy)
 
-            # Grid every 20px
-            painter.setPen(QPen(QColor(60, 80, 140, 30), 1))
-            for gx in range(int(wave_x) + 20, int(wave_x + wave_w), 20):
-                painter.drawLine(gx, wave_y, gx, wave_y + wave_h)
+                # Build polygon points for filled waveform
+                points: list[QPointF] = []
+                points.append(QPointF(wave_x, mid_y))
+                for i in range(n):
+                    val = hist[i]
+                    norm = min(1.0, val / max_rms)
+                    px = wave_x + i * step_x
+                    py = mid_y - norm * wave_h / 2  # center-biased
+                    points.append(QPointF(px, py))
+                points.append(QPointF(wave_x + (n - 1) * step_x, mid_y))
 
-            # Draw waveform segments with color-coded lines
-            for i in range(1, n):
-                val_prev = hist[i - 1]
-                val_cur = hist[i]
-                norm_prev = min(1.0, val_prev / max_rms)
-                norm_cur = min(1.0, val_cur / max_rms)
+                # Fill under waveform (gradient-like)
+                poly_color = QColor(80, 140, 255, 30)
+                painter.setBrush(poly_color)
+                painter.setPen(Qt.PenStyle.NoPen)
+                for i in range(1, n):
+                    val = hist[i]
+                    norm = min(1.0, val / max_rms)
+                    px1 = wave_x + (i - 1) * step_x
+                    px2 = wave_x + i * step_x
+                    py1 = mid_y - min(1.0, hist[i - 1] / max_rms) * wave_h / 2
+                    py2 = mid_y - norm * wave_h / 2
+                    fill_col = QColor(80, 140, 255, max(5, int(25 * norm)))
+                    painter.setBrush(fill_col)
+                    painter.drawRect(int(px1), int(py2), max(1, int(px2 - px1)), int(mid_y - py2))
 
-                px1 = wave_x + (i - 1) * step_x
-                px2 = wave_x + i * step_x
-                py1 = wave_y + wave_h - norm_prev * wave_h
-                py2 = wave_y + wave_h - norm_cur * wave_h
+                # Draw waveform line segments (color-coded by amplitude)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                for i in range(1, n):
+                    val_prev = hist[i - 1]
+                    val_cur = hist[i]
+                    norm_prev = min(1.0, val_prev / max_rms)
+                    norm_cur = min(1.0, val_cur / max_rms)
 
-                # Colour-code: green (<50%), yellow (50-80%), red (>80%)
-                avg = (norm_prev + norm_cur) / 2
-                if avg > 0.80:
-                    color = self._RED
-                elif avg > 0.50:
-                    color = self._YELLOW
-                else:
-                    color = self._GREEN
+                    px1 = wave_x + (i - 1) * step_x
+                    px2 = wave_x + i * step_x
+                    py1 = mid_y - norm_prev * wave_h / 2
+                    py2 = mid_y - norm_cur * wave_h / 2
 
-                painter.setPen(QPen(color, 1.5))
-                painter.drawLine(px1, py1, px2, py2)
+                    avg = (norm_prev + norm_cur) / 2
+                    if avg > 0.80:
+                        color = self._RED
+                    elif avg > 0.50:
+                        color = self._YELLOW
+                    else:
+                        color = self._GREEN
+
+                    # Thicker line for higher amplitudes
+                    line_w = 1.0 + avg * 2.0
+                    painter.setPen(QPen(color, line_w))
+                    painter.drawLine(px1, py1, px2, py2)
 
         painter.end()
 
@@ -584,6 +565,11 @@ class AvatarWindow(QWidget):
         self._debug_panel.hide()
         frame_layout.addWidget(self._debug_panel)
 
+        # Auto-show debug waveform on startup
+        self._debug_enabled = True
+        self._debug_panel.show()
+        self._debug_timer.start()
+
         # ── Control bar ──
         ctrl = QHBoxLayout()
         ctrl.setContentsMargins(2, 0, 2, 2)
@@ -638,7 +624,7 @@ class AvatarWindow(QWidget):
         self._pulse_timer.timeout.connect(self._on_pulse_tick)
 
         # ── Debug panel refresh timer (10 fps when visible) ──
-        self._debug_enabled = False
+        self._debug_enabled = True
         self._debug_timer = QTimer(self)
         self._debug_timer.setInterval(100)
         self._debug_timer.timeout.connect(self._debug_repaint)

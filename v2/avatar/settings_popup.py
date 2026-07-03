@@ -221,6 +221,17 @@ class SettingsPopup(QFrame):
         be_row.addWidget(self.backend_status)
         lo.addLayout(be_row)
 
+        # Debug waveform toggle
+        lo.addWidget(self._sep())
+        dbg_row = QHBoxLayout(); dbg_row.setSpacing(6)
+        dbg_check = QCheckBox("\U0001f50a  Audio Waveform")
+        dbg_check.setChecked(True)
+        dbg_check.toggled.connect(lambda v: self._emit("debug_overlay", enabled=v))
+        dbg_row.addWidget(dbg_check)
+        dbg_row.addStretch()
+        self._debug_check = dbg_check
+        lo.addLayout(dbg_row)
+
         lo.addStretch()
         return tab
 

@@ -273,3 +273,89 @@ incarnations:
         type: text
         default: "logs"
         description: "Where cost JSONL logs are stored"
+
+  # ═══════════════════════════════════════════════════════════════
+  # 3: MuseTalk Local Avatar (RTX 4050)
+  # ═══════════════════════════════════════════════════════════════
+  - name: "\U0001f3ad MuseTalk Local"
+    description: "v2 assistant + real-time MuseTalk lip-sync on RTX 4050 (local, no API)"
+    command:
+      linux: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python avatar_video/musetalk_assistant.py --photo ${PHOTO_PATH}'"
+    cwd: "."
+    log_file: "logs/musetalk.log"
+
+    settings:
+      # ── Source Photo ──
+      avatar.photo_path:
+        label: "Source Photo"
+        type: text
+        default: "avatar_video/face.jpg"
+        description: "Path to the face photo to animate"
+
+      # ── Model paths (auto-filled by setup.sh) ──
+      avatar.models_dir:
+        label: "Models Directory"
+        type: text
+        default: "avatar_video/models"
+        description: "Where model weights are stored"
+
+      # ── Audio capture ──
+      audio.input:
+        label: "Input Device"
+        type: text
+        default: "default"
+        description: "ALSA/PulseAudio input device"
+      audio.output:
+        label: "Output Device"
+        type: text
+        default: "default"
+        description: "ALSA/PulseAudio output device"
+
+      # ── Avatar window ──
+      avatar.frame:
+        label: "Frame Shape"
+        type: dropdown
+        options: ["rounded", "square", "circle"]
+        default: "rounded"
+        description: "Avatar window shape"
+      avatar.hue:
+        label: "Hue"
+        type: range
+        min: 0
+        max: 360
+        default: 200
+        description: "HSL hue (0-360)"
+
+      # ── MuseTalk inference ──
+      musetalk.fps:
+        label: "Output FPS"
+        type: number
+        default: 25
+        description: "Video frame rate"
+      musetalk.batch_size:
+        label: "Batch Size"
+        type: number
+        min: 1
+        max: 64
+        default: 16
+        description: "UNet batch size (higher = faster, more VRAM)"
+      musetalk.audio_padding:
+        label: "Audio Padding (s)"
+        type: number
+        default: 2
+        description: "Seconds of audio context before/after"
+
+      # ── VAD ──
+      vad.threshold:
+        label: "VAD Threshold"
+        type: range
+        min: 0.0
+        max: 1.0
+        step: 0.01
+        default: 0.40
+        description: "Voice activity detection sensitivity"
+      vad.silence_seconds:
+        label: "Silence Timeout (s)"
+        type: number
+        default: 0.4
+        description: "Silence before end-of-speech"
