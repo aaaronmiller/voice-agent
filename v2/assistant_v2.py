@@ -1442,7 +1442,6 @@ class Assistant:
             if provider and provider != self._backend_provider and provider in REGISTRY:
                 print(f"[settings] switching backend to {provider}", flush=True)
                 self._backend_provider = provider
-                # Re-init with current config (the provider is stored in self.config)
                 self._init_backend(self.config)
                 if self._backend and not self._backend.is_available():
                     print(f"[settings] backend {provider} is NOT available", flush=True)
@@ -1457,6 +1456,41 @@ class Assistant:
         elif cmd == "set_silence_seconds":
             val = kw.get("value", 0.4)
             self.vad.silence_seconds = float(val)
+        elif cmd == "config":
+            """Update a config section from the Cloud/Agent tabs."""
+            section = kw.get("section", "")
+            key = kw.get("key", "")
+            value = kw.get("value")
+            if section and key and value is not None:
+                if key == "*" and isinstance(value, dict):
+                    # Full section replacement (from profile load)
+                    if section in self.config and isinstance(self.config[section], dict):
+                        self.config[section].update(value)
+                    else:
+                        self.config[section] = dict(value)
+                else:
+                    self.config.setdefault(section, {})[key] = value
+                print(f"[settings] config {section}.{key} = {value}", flush=True)
+                # Apply immediately for certain sections
+                if section == "llm" and key in ("provider", "base_url", "api_key", "model"):
+                    self._init_backend(self.config)
+                elif section == "assistant" and key == "wake_phrase":
+                    if hasattr(self, '_reload_wake_word'):
+                        self._reload_wake_word()
+                elif section == "stt" and key == "provider":
+                    if hasattr(self, '_reload_stt'):
+                        self._reload_stt()
+                elif section == "tts" and key == "provider":
+                    if hasattr(self, '_reload_tts'):
+                        self._reload_tts()
+        elif cmd == "config_reload":
+            """Full config reload (after profile load)."""
+            print(f"[settings] config_reload triggered", flush=True)
+            self._init_backend(self.config)
+        elif cmd == "load_profile":
+            name = kw.get("name", "")
+            if name:
+                print(f"[settings] profile loaded: {name}", flush=True)
 
     def run(self) -> int:
         signal.signal(signal.SIGINT, self._stop)
