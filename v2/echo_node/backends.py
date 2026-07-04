@@ -73,6 +73,9 @@ class HermesBackend(AgentBackend):
     name: str = "Hermes Agent"
     config_key: str = "hermes"
 
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config=config)
+
     def is_available(self) -> bool:
         try:
             base = str(self.config.get("base_url", "http://127.0.0.1:8642/v1")).rstrip("/")
@@ -519,7 +522,7 @@ def create_backend(provider: str, config: dict[str, Any]) -> AgentBackend:
     # Layer on the provider-specific subsection
     provider_cfg = dict(config.get(cls.config_key, {}))
     merged = {**backend_cfg, **provider_cfg}
-    return cls(merged)
+    return cls(config=merged)
 
 
 def check_backend_availability(provider: str, config: dict[str, Any]) -> bool:
