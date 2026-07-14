@@ -1,389 +1,333 @@
 /**
- * Gemini Live Adapter
+ * Gemini Live API Adapter for Echo-Node Gateway
  * 
- * WebSocket proxy to Google Gemini Live API for cloud voice mode.
- * Handles bidirectional audio streaming with the Gemini Live API.
+ * Proxies bidirectional audio WebSocket to Google's Gemini Flash Live API.
+ * Handles 16kHz PCM audio, VAD (server-side), and barge-in.
  */
 
-import type { PipelineState } from '../utils/types';
+import { WebSocket } from 'bun';
 
-export interface GeminiLiveConfig {
+interface GeminiLiveConfig {
   apiKey: string;
   model: string;
-  voice: string;
-  language: string;
-  sampleRate: number;
+  voiceName: string;
 }
 
-export interface GeminiLiveEvent {
-  type: 'setup' | 'audio_in' | 'audio_out' | 'interrupted' | 'error' | 'complete';
-  data?: unknown;
+interface ClientInfo {
+  id: string;
+  frontendWs: WebSocket;
+  geminiWs: WebSocket | null;
+  connectedAt: number;
+  isSpeaking: boolean;
 }
 
-type GeminiLiveCallback = (event: GeminiLiveEvent) => void;
-
-interface GeminiSetupPayload {
-  setup: {
-    model: string;
-    voice: string;
-    language_code: string;
-    audio_config: {
-      sample_rate: number;
-      channel_count: number;
-      bitrate: number;
-    };
-  };
-}
-
-interface GeminiServerSetupResponse {
-  setup?: {
-    model: string;
-  };
-  server_content?: {
-    interrupted?: boolean;
-    groundings?: unknown[];
-  };
-}
-
+/**
+ * Gemini Live API Adapter
+ * 
+ * Manages WebSocket connections between frontend and Gemini Live API.
+ * Handles:
+ * - Audio streaming (16kHz PCM)
+ * - Server-side VAD
+ * - Barge-in detection (interrupted: true)
+ * - Session management
+ */
 export class GeminiLiveAdapter {
+  private clients: Map<string, ClientInfo> = new Map();
   private config: GeminiLiveConfig;
-  private ws: WebSocket | null = null;
-  private clientWs: WebSocket | null = null;
-  private isConnected = false;
-  private isSetup = false;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
-  private callback: GeminiLiveCallback | null = null;
-  private pendingAudioChunks: Array<Uint8Array> = [];
-  private audioBuffer: Uint8Array = new Uint8Array(0);
-  private sampleRate = 16000;
-  private onBargeIn: (() => void) | null = null;
+  private readonly GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent';
 
   constructor(config: GeminiLiveConfig) {
     this.config = config;
-    this.sampleRate = config.sampleRate || 16000;
   }
 
   /**
-   * Validate API key by attempting a minimal connection
+   * Validate API key is present
    */
-  async validateApiKey(): Promise<{ valid: boolean; error?: string }> {
-    if (!this.config.apiKey) {
-      return { valid: false, error: 'API key is required' };
+  static validateConfig(apiKey: string): { valid: boolean; error?: string } {
+    if (!apiKey || apiKey.trim() === '') {
+      return {
+        valid: false,
+        error: 'Gemini API key is required for cloud mode. Set llm.api_key in config.yaml.',
+      };
     }
-
-    if (!this.config.apiKey.match(/^[A-Za-z0-9_-]{30,}$/)) {
-      return { valid: false, error: 'Invalid API key format' };
-    }
-
     return { valid: true };
   }
 
   /**
-   * Set callback for events
+   * Handle new frontend client connection
    */
-  onEvent(callback: GeminiLiveCallback): void {
-    this.callback = callback;
-  }
-
-  /**
-   * Set barge-in handler
-   */
-  setBargeInHandler(handler: () => void): void {
-    this.onBargeIn = handler;
-  }
-
-  /**
-   * Connect to Gemini Live API
-   */
-  async connect(): Promise<void> {
-    if (this.isConnected) {
-      return;
-    }
-
-    const url = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.DeliveryService/GenerateContent?key=${this.config.apiKey}`;
-
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(url);
-
-        this.ws.onopen = () => {
-          console.log('[GeminiLive] Connected to Gemini Live API');
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this.sendSetup();
-          resolve();
-        };
-
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-
-        this.ws.onerror = (error) => {
-          console.error('[GeminiLive] WebSocket error:', error);
-          if (!this.isConnected) {
-            reject(new Error('Failed to connect to Gemini Live API'));
-          }
-        };
-
-        this.ws.onclose = () => {
-          console.log('[GeminiLive] Disconnected from Gemini Live API');
-          this.isConnected = false;
-          this.isSetup = false;
-          this.attemptReconnect();
-        };
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  /**
-   * Connect to client (frontend)
-   */
-  connectClient(ws: WebSocket): void {
-    this.clientWs = ws;
-    console.log('[GeminiLive] Client connected');
-  }
-
-  /**
-   * Disconnect client
-   */
-  disconnectClient(): void {
-    if (this.clientWs) {
-      this.clientWs.close();
-      this.clientWs = null;
-    }
-  }
-
-  /**
-   * Send setup message to Gemini
-   */
-  private sendSetup(): void {
-    const setupPayload: GeminiSetupPayload = {
-      setup: {
-        model: this.config.model || 'gemini-2.0-flash-live-001',
-        voice: this.config.voice || 'Kore',
-        language_code: this.config.language || 'en-US',
-        audio_config: {
-          sample_rate: this.sampleRate,
-          channel_count: 1,
-          bitrate: 128000,
-        },
-      },
+  handleClientConnect(ws: WebSocket, clientId: string): void {
+    const client: ClientInfo = {
+      id: clientId,
+      frontendWs: ws,
+      geminiWs: null,
+      connectedAt: Date.now(),
+      isSpeaking: false,
     };
 
-    this.send(JSON.stringify(setupPayload));
-    console.log('[GeminiLive] Sent setup payload');
+    this.clients.set(clientId, client);
+    console.log(`[GeminiLive] Client connected: ${clientId}`);
+
+    // Send connected message
+    ws.send(JSON.stringify({
+      type: 'gemini_connected',
+      client_id: clientId,
+    }));
   }
 
   /**
-   * Handle incoming message from Gemini
+   * Handle client disconnection
    */
-  private handleMessage(data: string | ArrayBuffer): void {
-    if (typeof data !== 'string') {
-      this.handleAudioChunk(data);
-      return;
+  handleClientDisconnect(clientId: string): void {
+    const client = this.clients.get(clientId);
+    if (client?.geminiWs) {
+      client.geminiWs.close();
     }
+    this.clients.delete(clientId);
+    console.log(`[GeminiLive] Client disconnected: ${clientId}`);
+  }
+
+  /**
+   * Handle message from frontend client
+   */
+  async handleClientMessage(clientId: string, message: string): Promise<void> {
+    const client = this.clients.get(clientId);
+    if (!client) return;
 
     try {
-      const message = JSON.parse(data) as GeminiServerSetupResponse;
+      const data = JSON.parse(message);
 
-      if (message.setup?.model) {
-        this.isSetup = true;
-        console.log('[GeminiLive] Setup complete, model:', message.setup.model);
-        this.callback?.({ type: 'setup', data: message });
-        return;
-      }
+      switch (data.type) {
+        case 'start_session':
+          await this.startGeminiSession(client);
+          break;
 
-      if (message.server_content?.interrupted) {
-        console.log('[GeminiLive] Barge-in detected (interrupted)');
-        this.callback?.({ type: 'interrupted' });
-        this.onBargeIn?.();
-        return;
+        case 'stop_session':
+          await this.stopGeminiSession(client);
+          break;
+
+        case 'barge_in':
+          await this.handleBargeIn(client);
+          break;
+
+        case 'audio_chunk':
+          // Forward audio chunk to Gemini
+          if (client.geminiWs && client.geminiWs.readyState === 1) {
+            client.geminiWs.send(JSON.stringify({
+              realtime_input: {
+                media_chunks: [{
+                  mimeType: 'audio/pcm;rate=16000',
+                  data: data.audio, // base64 encoded PCM audio
+                }],
+              },
+            }));
+          }
+          break;
+
+        default:
+          console.log(`[GeminiLive] Unknown message type: ${data.type}`);
       }
-    } catch {
-      console.warn('[GeminiLive] Failed to parse message');
+    } catch (error) {
+      console.error(`[GeminiLive] Error handling message from ${clientId}:`, error);
     }
   }
 
   /**
-   * Handle incoming audio chunk from Gemini
+   * Start Gemini Live session for a client
    */
-  private handleAudioChunk(data: ArrayBuffer): void {
-    if (!this.isSetup) {
+  private async startGeminiSession(client: ClientInfo): Promise<void> {
+    if (client.geminiWs) {
+      console.log(`[GeminiLive] Session already active for ${client.id}`);
       return;
     }
 
-    const chunk = new Uint8Array(data);
-    this.appendToBuffer(chunk);
+    const wsUrl = `${this.GEMINI_WS_URL}?key=${this.config.apiKey}`;
 
-    this.callback?.({ type: 'audio_out', data: chunk });
+    try {
+      const geminiWs = new WebSocket(wsUrl);
 
-    if (this.clientWs && this.clientWs.readyState === WebSocket.OPEN) {
-      this.clientWs.send(data);
-    }
-  }
+      geminiWs.onopen = () => {
+        console.log(`[GeminiLive] Gemini connected for ${client.id}`);
 
-  /**
-   * Append chunk to audio buffer
-   */
-  private appendToBuffer(chunk: Uint8Array): void {
-    const newBuffer = new Uint8Array(this.audioBuffer.length + chunk.length);
-    newBuffer.set(this.audioBuffer);
-    newBuffer.set(chunk, this.audioBuffer.length);
-    this.audioBuffer = newBuffer;
-  }
-
-  /**
-   * Send audio data to Gemini (from microphone)
-   */
-  sendAudio(audioData: Uint8Array): void {
-    if (!this.isConnected || !this.isSetup || !this.ws) {
-      this.pendingAudioChunks.push(audioData);
-      return;
-    }
-
-    if (this.pendingAudioChunks.length > 0) {
-      for (const chunk of this.pendingAudioChunks) {
-        this.sendBinary(chunk);
-      }
-      this.pendingAudioChunks = [];
-    }
-
-    this.sendBinary(audioData);
-  }
-
-  /**
-   * Send binary audio data
-   */
-  private sendBinary(data: Uint8Array): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(data);
-    }
-  }
-
-  /**
-   * Send text input to Gemini
-   */
-  sendText(text: string): void {
-    const message = {
-      client_content: {
-        turns: [
-          {
-            role: 'user',
-            parts: [{ text }],
+        // Send setup payload
+        geminiWs.send(JSON.stringify({
+          setup: {
+            model: `models/${this.config.model || 'gemini-2.0-flash-exp'}`,
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: this.config.voiceName || 'Puck',
+                  },
+                },
+              },
+            },
           },
-        ],
-        turn_complete: true,
-      },
-    };
+        }));
 
-    this.send(JSON.stringify(message));
-  }
+        client.geminiWs = geminiWs;
 
-  /**
-   * Send raw message
-   */
-  private send(message: string): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(message);
+        // Notify frontend
+        client.frontendWs.send(JSON.stringify({
+          type: 'gemini_session_started',
+          client_id: client.id,
+        }));
+      };
+
+      geminiWs.onmessage = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(typeof event.data === 'string' ? event.data : '');
+
+          // Handle server content (audio response)
+          if (data.serverContent) {
+            // Check for barge-in/interruption
+            if (data.serverContent.interrupted) {
+              console.log(`[GeminiLive] Barge-in detected for ${client.id}`);
+              client.isSpeaking = false;
+              client.frontendWs.send(JSON.stringify({
+                type: 'barge_in_ack',
+              }));
+              return;
+            }
+
+            // Check for model turn (audio response)
+            if (data.serverContent.modelTurn) {
+              const parts = data.serverContent.modelTurn.parts;
+              for (const part of parts) {
+                if (part.inlineData && part.inlineData.data) {
+                  // Forward audio to frontend
+                  client.frontendWs.send(JSON.stringify({
+                    type: 'gemini_audio',
+                    audio: part.inlineData.data,
+                    mimeType: 'audio/pcm',
+                  }));
+                  client.isSpeaking = true;
+                }
+              }
+            }
+
+            // Turn complete
+            if (data.serverContent.turnComplete) {
+              client.isSpeaking = false;
+              client.frontendWs.send(JSON.stringify({
+                type: 'gemini_turn_complete',
+              }));
+            }
+          }
+        } catch (error) {
+          console.error(`[GeminiLive] Error parsing Gemini response:`, error);
+        }
+      };
+
+      geminiWs.onclose = () => {
+        console.log(`[GeminiLive] Gemini disconnected for ${client.id}`);
+        client.geminiWs = null;
+        client.isSpeaking = false;
+
+        client.frontendWs.send(JSON.stringify({
+          type: 'gemini_disconnected',
+          client_id: client.id,
+        }));
+      };
+
+      geminiWs.onerror = (error) => {
+        console.error(`[GeminiLive] Gemini error for ${client.id}:`, error);
+        client.frontendWs.send(JSON.stringify({
+          type: 'error',
+          message: 'Gemini connection failed',
+          code: 'GEMINI_CONNECTION_ERROR',
+        }));
+      };
+    } catch (error) {
+      console.error(`[GeminiLive] Failed to start Gemini session for ${client.id}:`, error);
+      client.frontendWs.send(JSON.stringify({
+        type: 'error',
+        message: 'Failed to connect to Gemini API',
+        code: 'GEMINI_CONNECTION_ERROR',
+      }));
     }
   }
 
   /**
-   * Disconnect from Gemini
+   * Stop Gemini Live session for a client
    */
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+  private async stopGeminiSession(client: ClientInfo): Promise<void> {
+    if (client.geminiWs) {
+      client.geminiWs.close();
+      client.geminiWs = null;
+      client.isSpeaking = false;
+
+      client.frontendWs.send(JSON.stringify({
+        type: 'gemini_session_stopped',
+        client_id: client.id,
+      }));
+
+      console.log(`[GeminiLive] Session stopped for ${client.id}`);
+    }
+  }
+
+  /**
+   * Handle barge-in (user speaks while Gemini is responding)
+   */
+  private async handleBargeIn(client: ClientInfo): Promise<void> {
+    if (!client.isSpeaking) return;
+
+    console.log(`[GeminiLive] Barge-in triggered for ${client.id}`);
+
+    // Send stop signal to Gemini (interrupts current generation)
+    if (client.geminiWs && client.geminiWs.readyState === 1) {
+      client.geminiWs.send(JSON.stringify({
+        clientContent: {
+          turns: [{
+            role: 'user',
+            parts: [{ text: '' }],
+          }],
+          turnComplete: true,
+        },
+      }));
     }
 
-    this.isConnected = false;
-    this.isSetup = false;
-    this.disconnectClient();
-    console.log('[GeminiLive] Disconnected');
+    client.isSpeaking = false;
+
+    client.frontendWs.send(JSON.stringify({
+      type: 'barge_in_ack',
+    }));
   }
 
   /**
-   * Attempt reconnection
+   * Get active client count
    */
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[GeminiLive] Max reconnect attempts reached');
-      this.callback?.({ type: 'error', data: { message: 'Max reconnect attempts reached' } });
-      return;
+  getClientCount(): number {
+    return this.clients.size;
+  }
+
+  /**
+   * Cleanup - close all connections
+   */
+  shutdown(): void {
+    for (const client of this.clients.values()) {
+      if (client.geminiWs) {
+        client.geminiWs.close();
+      }
+      client.frontendWs.close();
     }
-
-    this.reconnectAttempts++;
-    const delay = 1000 * Math.pow(2, this.reconnectAttempts - 1);
-
-    console.log(`[GeminiLive] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-
-    setTimeout(() => {
-      this.connect().catch((error) => {
-        console.error('[GeminiLive] Reconnect failed:', error);
-      });
-    }, delay);
-  }
-
-  /**
-   * Get connection status
-   */
-  getStatus(): { connected: boolean; setup: boolean } {
-    return {
-      connected: this.isConnected,
-      setup: this.isSetup,
-    };
-  }
-
-  /**
-   * Get current audio buffer (for processing)
-   */
-  getAudioBuffer(): Uint8Array {
-    return this.audioBuffer;
-  }
-
-  /**
-   * Clear audio buffer
-   */
-  clearAudioBuffer(): void {
-    this.audioBuffer = new Uint8Array(0);
+    this.clients.clear();
+    console.log('[GeminiLive] All connections closed');
   }
 }
 
 /**
  * Create Gemini Live adapter instance
  */
-export function createGeminiLiveAdapter(config: GeminiLiveConfig): GeminiLiveAdapter {
-  return new GeminiLiveAdapter(config);
-}
-
-/**
- * Get available voices for Gemini Live
- */
-export function getGeminiLiveVoices(): string[] {
-  return [
-    'Kore',
-    'Charon',
-    'Fenrir',
-    'Aoede',
-    'Puck',
-    'Enceladus',
-    'Callirrhoe',
-    'Autonoe',
-    'Killjoy',
-    'Orus',
-  ];
-}
-
-/**
- * Get available models for Gemini Live
- */
-export function getGeminiLiveModels(): string[] {
-  return [
-    'gemini-2.0-flash-live-001',
-    'gemini-2.5-flash-live-preview-05-20',
-  ];
+export function createGeminiLiveAdapter(config: {
+  apiKey: string;
+  model?: string;
+  voiceName?: string;
+}): GeminiLiveAdapter {
+  return new GeminiLiveAdapter({
+    apiKey: config.apiKey,
+    model: config.model || 'gemini-2.0-flash-exp',
+    voiceName: config.voiceName || 'Puck',
+  });
 }

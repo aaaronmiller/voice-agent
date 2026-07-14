@@ -1,178 +1,182 @@
-# Gemini Live Setup Guide
+# Gemini Live API Setup for Echo-Node
 
-**Purpose**: Configure Echo-Node to use Google Gemini Live API for cloud-based voice conversation.
+**Purpose**: Configure Gemini Flash Live API for cloud-based voice conversations.
 
 ---
 
 ## Overview
 
-Cloud mode (`pipeline_mode: cloud`) routes all voice processing through Google's Gemini Live API:
-- **STT**: Gemini handles speech recognition
-- **LLM**: Gemini generates responses  
-- **TTS**: Gemini provides audio output
+Gemini Flash Live API provides real-time bidirectional audio processing:
+- **Server-side STT** - Speech recognition handled by Google
+- **Server-side LLM** - Gemini processes your input
+- **Server-side TTS** - Audio responses streamed back
+- **Native VAD** - Voice activity detection built-in
+- **Barge-in Support** - Speak while Gemini responds to interrupt
 
-This bypasses local models, enabling voice conversation on devices without GPU.
+**Latency**: Sub-300ms (server-side processing)
 
 ---
 
 ## Prerequisites
 
-1. **Google AI Studio Account**: https://aistudio.google.com/app/apikey
-2. **API Key**: Generated from Google AI Studio
-3. **Echo-Node**: Installed per setup guide
+1. **Google Cloud Account** - Required for API key
+2. **Echo-Node** - Installed and working
+3. **Internet Connection** - Required for cloud mode
 
 ---
 
-## Setup
+## Step 1: Get Gemini API Key
 
-### Step 1: Get API Key
+### Option A: Google AI Studio
 
-1. Go to https://aistudio.google.com/app/apikey
-2. Click "Create API Key"
-3. Copy the key (starts with `AIza...`)
+1. Go to [https://aistudio.google.com](https://aistudio.google.com)
+2. Sign in with Google account
+3. Click "Get API Key"
+4. Copy the key (starts with `AIza...`)
 
-### Step 2: Configure Cloud Mode
+### Option B: Google Cloud Console
+
+1. Go to [https://console.cloud.google.com](https://console.cloud.google.com)
+2. Enable "Generative Language API"
+3. Create API credentials
+4. Copy the API key
+
+---
+
+## Step 2: Configure Echo-Node
 
 Edit `config.yaml`:
 
 ```yaml
-# Enable cloud mode
+# Switch to cloud pipeline mode
 pipeline_mode: cloud
 
-# LLM provider (required for cloud mode)
 llm:
-  provider: openai-compat
-  model: "gemini-2.0-flash-live-001"
-  api_key: "your-google-ai-api-key"
-  base_url: "https://generativelanguage.googleapis.com/v1"
-
-# Audio settings (must match Gemini Live requirements)
-audio:
-  sample_rate: 16000
-  channels: 1
+  provider: openai-compat  # Placeholder - cloud mode bypasses local LLM
+  model: "gemini-2.0-flash-exp"
+  api_key: "YOUR_GEMINI_API_KEY_HERE"  # Required for cloud mode
+  base_url: ""  # Not used in cloud mode
 ```
 
-### Step 3: Verify Configuration
+---
+
+## Step 3: Run in Cloud Mode
 
 ```bash
+# Terminal 1: Worker (still runs for wake word detection)
 cd worker
-python -c "from config import Config; c = Config(); print(f'Pipeline mode: {c.pipeline_mode}')"
+source .venv/bin/activate
+python main.py
+
+# Terminal 2: Gateway (handles Gemini proxy)
+cd gateway
+bun run src/index.ts
+
+# Terminal 3: Frontend
+cd frontend
+bun run dev
 ```
 
-Expected output: `Pipeline mode: cloud`
+Open http://localhost:5173 and speak - Gemini handles the rest!
 
 ---
 
-## Usage
+## How It Works
 
-### Start Echo-Node
-
-```bash
-# Terminal mode
-cd worker && python main.py
+```
+┌─────────────────┐     WebSocket      ┌─────────────────┐
+│   Frontend      │◄──────────────────►│    Gateway      │
+│   (Svelte 5)    │   JSON + Audio     │   (Bun + Hono)  │
+└─────────────────┘                    └────────┬────────┘
+                                                │
+                                       WebSocket
+                                    (JSON + PCM audio)
+                                                │
+                                       ┌────────▼────────┐
+                                       │   Gemini Live   │
+                                       │   Flash API     │
+                                       │   (Google)      │
+                                       └─────────────────┘
 ```
 
-In cloud mode:
-1. Say wake word ("Yo Gimp") or press hotkey
-2. Gateway opens WebSocket to Gemini Live API
-3. Your voice streams directly to Gemini
-4. Gemini responses stream back to your speakers
-5. Say wake word again for new interaction
+### Audio Flow
 
-### Cloud Mode Events
+1. **Frontend** captures 16kHz PCM audio via Web Audio API
+2. **Gateway** relays audio to Gemini Live API
+3. **Gemini** processes audio (STT → LLM → TTS server-side)
+4. **Gemini** streams audio response back
+5. **Gateway** relays audio to frontend
+6. **Frontend** plays audio response
 
-The gateway emits these events in cloud mode:
-- `cloud_stream_start`: Gemini Live session started
-- `cloud_stream_stop`: Gemini Live session ended  
-- `interrupted`: User barge-in detected
+### Barge-in Flow
 
----
-
-## Troubleshooting
-
-### "API key is required"
-
-Ensure `llm.api_key` is set in config.yaml with your Google AI API key.
-
-### "Invalid API key format"
-
-Your API key must be a valid Google AI Studio key (30+ characters, alphanumeric with dashes/underscores).
-
-### "Failed to connect to Gemini Live API"
-
-- Check internet connectivity
-- Verify API key is valid at https://aistudio.google.com/app/apikey
-- Check firewall allows WebSocket connections to `generativelanguage.googleapis.com`
-
-### Audio Not Playing
-
-- Check system volume
-- Verify `audio.sample_rate` is 16000 (Gemini Live requirement)
-- Check gateway logs for audio chunk errors
-
-### Latency Issues
-
-Cloud mode adds network latency. For lower latency:
-- Use local mode with local models
-- Ensure stable internet connection
-- Consider closer GCP region
+1. User speaks while Gemini is responding
+2. Frontend detects audio input
+3. Gateway sends barge-in signal to Gemini
+4. Gemini stops current generation
+5. Frontend acknowledges barge-in
+6. New conversation turn begins
 
 ---
 
 ## Available Voices
 
-Gemini Live supports these voices:
-- Kore (default)
-- Charon
-- Fenrir
-- Aoede
-- Puck
-- Enceladus
-- Callirrhoe
-- Autonoe
-- Killjoy
-- Orus
+| Voice Name | Description | Gender |
+|------------|-------------|--------|
+| `Puck` | Friendly, conversational | Male |
+| `Charon` | Professional, clear | Male |
+| `Kore` | Warm, engaging | Female |
+| `Fenrir` | Deep, authoritative | Male |
+| `Aoede` | Natural, expressive | Female |
 
-To change voice, no current config option - this is set internally in the adapter.
-
----
-
-## Available Models
-
-- `gemini-2.0-flash-live-001` (default)
-- `gemini-2.5-flash-live-preview-05-20`
-
----
-
-## Cost
-
-Gemini Live pricing (as of 2026):
-- Audio input: $0.016/minute
-- Audio output: $0.016/minute
-
-Check https://ai.google.dev/pricing for latest pricing.
-
----
-
-## Comparison: Local vs Cloud
-
-| Feature | Local | Cloud |
-|---------|-------|-------|
-| GPU Required | Yes | No |
-| Latency | ~500ms | ~300ms + network |
-| Privacy | All local | Audio to Google |
-| Cost | Electricity only | Per-minute API |
-| Offline | Yes | No |
-| Custom Models | Yes | No |
-
----
-
-## Disabling Cloud Mode
-
-To switch back to local mode:
+Configure in `config.yaml`:
 
 ```yaml
-pipeline_mode: local
+llm:
+  model: "gemini-2.0-flash-exp"
+  # Voice is set in gateway config
 ```
 
-Then restart Echo-Node.
+---
+
+## Troubleshooting
+
+### "API key is required for cloud mode"
+
+```yaml
+llm:
+  api_key: "YOUR_KEY_HERE"  # Must be set
+```
+
+### "Failed to connect to Gemini API"
+
+1. Verify API key is correct
+2. Check internet connection
+3. Verify API key has Generative Language API enabled
+
+### "High latency"
+
+- Cloud mode should be sub-300ms
+- Check network speed
+- Try different Gemini model variant
+
+---
+
+## Cost Estimation
+
+Gemini Flash Live pricing (as of March 2026):
+
+- **Input Audio**: $0.001 per minute
+- **Output Audio**: $0.002 per minute
+- **Typical session**: ~$0.01-0.05 per hour
+
+Check [Google AI Pricing](https://ai.google.dev/pricing) for current rates.
+
+---
+
+## Next Steps
+
+- [Setup WSL2](setup-wsl2.md) - Audio configuration
+- [Setup Fedora](setup-fedora.md) - Native Linux
+- [Setup macOS](setup-macos.md) - macOS setup
+- [Quickstart](../quickstart.md) - Get started

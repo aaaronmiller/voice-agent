@@ -10,6 +10,7 @@ from worker.providers.base import STTProvider, TTSProvider, VADProvider, WakeWor
 # Import provider implementations
 from worker.providers.stt.sherpa_stt import SherpaSTT
 from worker.providers.stt.faster_whisper_stt import FasterWhisperSTT
+from worker.providers.stt.vibevoice_asr import VibeVoiceASR
 from worker.providers.tts.kokoro_tts import KokoroTTS
 from worker.providers.tts.piper_tts import PiperTTS
 from worker.providers.vad.silero_vad import SileroVAD
@@ -22,7 +23,7 @@ PROVIDER_REGISTRY: dict[str, dict[str, type]] = {
     "stt": {
         "sherpa-onnx": SherpaSTT,
         "faster-whisper": FasterWhisperSTT,
-        # "vibevoice-asr": VibeVoiceASR,  # Phase 5
+        "vibevoice-asr": VibeVoiceASR,
     },
     "tts": {
         "kokoro": KokoroTTS,

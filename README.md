@@ -1,183 +1,280 @@
-# Echo-Node
+# Echo-Node — 3-Tier Local Voice AI System
 
-**Modular Open-Source Voice AI Interface**
+> **Status:** Functional architecture with skeleton providers. Not production-ready — significant implementation gaps in model loading and audio synthesis.
 
-Wake word activation → STT → LLM → TTS pipeline with animated 3D avatar.
-
----
-
-## Quick Start
-
-### 1. Run Setup
-
-```bash
-./setup.sh
-```
-
-This will:
-- Install Python dependencies (worker)
-- Install Bun dependencies (gateway + frontend)
-- Download default models (STT, TTS, VAD, wake word)
-- Create config.yaml from example
-
-### 2. Configure
-
-Edit `config.yaml`:
-
-```yaml
-llm:
-  provider: ollama
-  model: llama3.2:7b-q4_K_M
-  base_url: http://localhost:11434/v1
-
-# Or use cloud LLM:
-# llm:
-#   provider: openai-compat
-#   base_url: https://openrouter.ai/api/v1
-#   api_key: sk-or-xxx
-```
-
-### 3. Start Ollama (if using local LLM)
-
-```bash
-ollama pull llama3.2:7b-q4_K_M
-ollama serve
-```
-
-### 4. Run Echo-Node
-
-```bash
-# Terminal 1: Worker
-cd worker
-python main.py
-
-# Terminal 2: Gateway
-cd gateway
-bun run src/index.ts
-
-# Terminal 3: Frontend (optional - web UI mode)
-cd frontend
-bun run dev
-```
-
-Or use the dev script (all-in-one):
-
-```bash
-bun run dev
-```
-
-### 5. Use
-
-**Headless (terminal) mode:**
-
-```bash
-# In config.yaml: ui.mode: headless
-# Then say wake word: "Yo Gimp"
-# Ask question, hear response
-```
-
-**Web UI mode:**
-
-```bash
-# In config.yaml: ui.mode: web
-# Open http://localhost:5173
-# Click mic or say wake word
-```
-
----
+Echo-Node is a local-first voice AI pipeline with a 3-tier design: **worker** (audio + ML inference) → **gateway** (websocket hub + REST API) → **frontend** (Svelte5 UI). It supports wake word detection, streaming STT, streaming LLM, streaming TTS, barge-in interruption, personality system prompts, and optional cloud mode (Gemini Live).
 
 ## Architecture
 
 ```
-┌─────────────────┐     WebSocket      ┌─────────────────┐
-│   Frontend      │◄──────────────────►│    Gateway      │
-│   (Svelte 5)    │   JSON events      │   (Bun + Hono)  │
-│   Avatar + UI   │                    │   REST + WS     │
-└─────────────────┘                    └────────┬────────┘
-                                                │
-                                       WebSocket
-                                    binary + JSON
-                                                │
-                                       ┌────────▼────────┐
-                                       │    Worker       │
-                                       │   (Python)      │
-                                       │  STT/TTS/LLM    │
-                                       └─────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        ECHO-NODE PIPELINE                     │
+│                                                                 │
+│  Tier 1: WORKER (Python, port 9001)                           │
+│  ┌─────────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌───────┐  │
+│  │  Audio  │→│ VAD │→│ STT │→│ LLM │→│ TTS │→│ Audio │  │
+│  │ Capture │  │     │  │     │  │     │  │     │  │ Out   │  │
+│  └─────────┘  └─────┘  └─────┘  └─────┘  └─────┘  └───────┘  │
+│     │          ▲         │                                │   │
+│     │   Wake Word ◄──────┘                                │   │
+│     │   (openwakeword)                                    │   │
+│     └─────────────────────────────────────────────────────┘   │
+│              ▲                                                │
+│              │ WebSocket (aiohttp)                            │
+├────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Tier 2: GATEWAY (Bun/Hono, port 3000)                        │
+│  ┌──────────────┐  ┌───────────┐  ┌─────────────────────────┐ │
+│  │ WebSocket Hub│←→│ REST API  │  │ Integrations            │ │
+│  │ (relay)      │  │ /health   │  │ - Hermes AI (optional)  │ │
+│  │              │  │ /config   │  │ - OpenClaw skills (opt) │ │
+│  │ Frontend ←───┘  │ /status   │  │ - MCP bridge (optional) │ │
+│  │ Worker   ◄──────│ /personalities│ Gemini Live Adapter     │ │
+│  │ ESP32 (opt)     │ /avatars  │  └─────────────────────────┘ │
+│  └──────────────┘  └───────────┘                              │
+│                                                                 │
+├────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Tier 3: FRONTEND (Svelte5 + Vite)                           │
+│  ┌──────────────────┐ ┌────────────────┐                      │
+│  │ Waveform Display │ │ Transcript Log │                      │
+│  │ Status Indicator  │ │ Settings Panel │                      │
+│  │ Avatar Display   │ │ Pipeline State │                      │
+│  └──────────────────┘ └────────────────┘                      │
+│                                                                 │
+└────────────────────────────────────────────────────────────────┘
 ```
 
----
+## Pipeline State Machine
+
+The worker drives a 5-state machine that orchestrates the conversation cycle:
+
+```
+DORMANT → TRIGGERED → LISTENING → PROCESSING → SPEAKING → DORMANT
+                                    ↑              ↓
+                                    └── barge-in ──┘
+```
+
+| State | Description |
+|-------|-------------|
+| `DORMANT` | Idle, listening for wake word |
+| `TRIGGERED` | Wake word detected, playing activation chime |
+| `LISTENING` | VAD active, capturing speech to STT |
+| `PROCESSING` | STT → LLM → TTS pipeline running |
+| `SPEAKING` | TTS audio playback, barge-in enabled |
+
+Barge-in allows the user to interrupt mid-speech, returning to `LISTENING`.
+
+## Directory Structure
+
+```
+voice-agent/
+├── worker/                      # Python ML worker
+│   ├── main.py                  # Entry point — aiohttp WebSocket server on port 9001
+│   ├── pipeline.py              # Voice pipeline orchestrator
+│   ├── state_machine.py         # 5-state machine
+│   ├── config.py                # YAML config loader with validation
+│   ├── vram_calculator.py       # GPU VRAM estimator
+│   ├── audio/
+│   │   ├── capture.py           # Microphone capture (sounddevice/PyAudio, WSL2-aware)
+│   │   ├── playback.py          # Audio playback
+│   │   └── echo_cancel.py       # Echo cancellation (stub)
+│   ├── providers/
+│   │   ├── base.py              # ABC interfaces: STTProvider, TTSProvider, VADProvider, WakeWordProvider, LLMProvider
+│   │   ├── stt/
+│   │   │   ├── sherpa_stt.py    # REAL — Sherpa-ONNX streaming STT (Zipformer)
+│   │   │   ├── faster_whisper_stt.py  # SKELETON — model loading + transcribe commented out
+│   │   │   └── vibevoice_asr.py       # SKELETON — stub
+│   │   ├── tts/
+│   │   │   ├── kokoro_tts.py    # PLACEMENT — model loads if ONNX found, but synthesizes silence as fallback
+│   │   │   └── piper_tts.py     # SKELETON — model loading commented out, returns silence
+│   │   ├── vad/
+│   │   │   └── silero_vad.py    # REAL — torch.hub.load with energy-based fallback
+│   │   ├── wake_word/
+│   │   │   └── openwakeword.py  # Implementation present (tflite)
+│   │   └── llm/
+│   │       ├── ollama_llm.py    # REAL — full streaming chat via Ollama API
+│   │       └── openai_compat_llm.py  # REAL — OpenAI-compatible streaming
+│   ├── streaming/
+│   │   ├── conversation/
+│   │   │   └── memory.py        # Conversation memory with turn limits
+│   │   └── sentence_chunker.py  # Sentence-level chunking for TTS streaming
+│   ├── personalities/           # YAML personality files
+│   │   ├── hacker.yaml
+│   │   ├── butler.yaml
+│   │   ├── drill-sergeant.yaml
+│   │   ├── seductive.yaml
+│   │   └── stoner-philosopher.yaml
+│   ├── download_models.py       # Model download helper
+│   └── requirements.txt         # Python dependencies
+│
+├── gateway/                     # Bun/Hono server
+│   ├── src/
+│   │   ├── index.ts             # Entry point — Hono app on port 3000
+│   │   ├── websocket.ts         # WebSocket hub (frontend ↔ worker relay, ESP32 protocol)
+│   │   ├── routes/
+│   │   │   ├── health.ts        # /api/health
+│   │   │   ├── config.ts        # /api/config GET/PUT
+│   │   │   ├── status.ts        # /api/status
+│   │   │   ├── personalities.ts # /api/personalities
+│   │   │   └── avatars.ts       # /api/avatars
+│   │   ├── integrations/
+│   │   │   ├── hermes-adapter.ts
+│   │   │   ├── openclaw-adapter.ts
+│   │   │   ├── mcp-bridge.ts
+│   │   │   └── gemini-live-adapter.ts
+│   │   ├── sessions/session-manager.ts
+│   │   └── utils/
+│   │       ├── config-loader.ts
+│   │       ├── logger.ts
+│   │       └── types.ts
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── config.yaml
+│
+├── frontend/                    # Svelte5 + Vite
+│   ├── src/
+│   │   ├── routes/
+│   │   │   ├── +layout.svelte
+│   │   │   ├── +layout.ts
+│   │   │   └── +page.svelte
+│   │   └── lib/
+│   │       ├── components/
+│   │       │   ├── waveform.svelte
+│   │       │   ├── status-indicator.svelte
+│   │       │   ├── transcript.svelte
+│   │       │   ├── settings-panel.svelte
+│   │       │   ├── frame.svelte
+│   │       │   └── avatar-display.svelte
+│   │       ├── stores/
+│   │       │   ├── websocket.svelte.ts
+│   │       │   └── pipeline-state.svelte.ts
+│   │       └── utils/
+│   │           ├── audio.ts
+│   │           └── talking-head-loader.ts
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   └── build/                   # Pre-built output (no model files shipped)
+│
+├── config.yaml                  # Main config (optimized for 4GB VRAM)
+├── config.example.yaml          # Default config template
+└── docs/                        # Setup guides for Fedora, macOS, WSL2
+```
+
+## Provider Status
+
+| Provider | Component | Status | Details |
+|----------|-----------|--------|---------|
+| **Sherpa-ONNX STT** | `sherpa_stt.py` | **IMPLEMENTED** | Full streaming transcribe, requires downloadable Zipformer model ONNX files |
+| **Faster-Whisper STT** | `faster_whisper_stt.py` | **SKELETON** | Model loading and transcribe calls are commented out; returns placeholder text |
+| **VibeVoice ASR** | `vibevoice_asr.py` | **SKELETON** | Stub only |
+| **Silero VAD** | `silero_vad.py` | **IMPLEMENTED** | torch.hub.load with energy-based fallback — functional |
+| **openwakeword** | `openwakeword.py` | **IMPLEMENTED** | TFLite-based wake word detection present |
+| **Kokoro TTS** | `kokoro_tts.py` | **PLACEMENT** | ONNX model loading works, but the text-to-audio synthesis inputs are wrong (raw byte encoding — not proper tokenization). Falls back to silence when real model is loaded |
+| **Piper TTS** | `piper_tts.py` | **SKELETON** | Model loading commented out, returns pure silence arrays |
+| **Ollama LLM** | `ollama_llm.py` | **IMPLEMENTED** | Full streaming chat via `/api/chat`, including model discovery and error handling |
+| **OpenAI-Compatible LLM** | `openai_compat_llm.py` | **IMPLEMENTED** | Streaming OpenAI-format API client |
+
+## What Works
+
+- **State machine** — well-designed, thread-safe 5-state machine with transition validation
+- **Audio capture** — sounddevice with PyAudio fallback, WSL2 auto-detection, async streaming
+- **Ollama LLM** — complete streaming chat implementation with model discovery
+- **Silero VAD** — torch.hub integration with graceful energy-based fallback
+- **Gateway** — clean Hono app with WebSocket relay, REST API, config validation
+- **Frontend** — Svelte5 components with reactive stores for pipeline state and WebSocket
+- **Configuration system** — YAML-based with nested key access and validation
+- **Pipeline orchestrator** — wake word → VAD → STT → LLM → (sentence-chunked) TTS → playback
+- **Barge-in support** — interrupt TTS playback to return to listening
+- **Personality system** — YAML system prompts with fallback hardcoding
+- **Conversation memory** — turn-limited with history management
+- **Cloud mode** — Gemini Live relay architecture is wired in
+- **ESP32 protocol** — binary audio frame parser/builder for embedded devices
+
+## What Doesn't / What's Missing
+
+- **Faster-Whisper STT** — the `WhisperModel.__init__` and `transcribe()` calls are commented out; returns `[faster-whisper segment]` as fake text
+- **Kokoro TTS** — passes raw UTF-8 bytes as model input instead of proper phoneme/token encoding; the model path lookup and ONNX loading exist but synthesize produces silence
+- **Piper TTS** — `PiperVoice.load()` is commented out; returns zeroed numpy arrays
+- **VibeVoice ASR** — stub only
+- **Echo cancellation** — `echo_cancel.py` has a "SpeexDSP integration pending" placeholder
+- **Activation sounds** — startup chime and wake word beep are print statements only, no audio playback
+- **Gateway → Worker WebSocket** — `connectToWorker()` logs "deferred (Bun limitation)" and sets `workerConnection = null`; the actual worker-to-gateway connection exists as an aiohttp server the worker exposes, but the gateway's client-side connection to reach it is never established (Bun's WebSocket API doesn't support client connections natively in the way written). The worker is designed as a **server** (accepting connections), while the gateway code tries to be a **client** to it — the two don't connect automatically
+- **Frontend build** — the `build/` directory is a stub with no actual model files or full static output
+- **No real test suite** — no pytest files exist
+
+## Dependencies
+
+### Worker (Python)
+- `sounddevice` or `PyAudio` — audio capture
+- `numpy` — audio processing
+- `aiohttp` — async WebSocket server
+- `pyyaml` — config parsing
+- `torch` — Silero VAD (can fall back to energy detection)
+- `sherpa-onnx` — streaming STT
+- `openwakeword` — wake word detection
+- `aiohttp` + `httpx`-style — LLM API calls
+- `onnxruntime-gpu` (optional) — Kokoro TTS acceleration
+- `pynvml` — NVIDIA VRAM monitoring
+
+### Gateway (Bun)
+- `bun` runtime
+- `hono` — web framework
+- `pino` — structured logging
+
+### Frontend
+- `svelte@5` — frontend framework
+- `vite` — build tool
+- `sveltekit` — routing
+
+## Getting Started
+
+```bash
+# 1. Install Bun (for gateway)
+curl -fsSL https://bun.sh/install | bash
+
+# 2. Install gateway dependencies
+cd voice-agent/gateway && bun install
+
+# 3. Install Python worker dependencies
+cd ../worker
+pip install -r requirements.txt
+
+# 4. Download model files (requires manual step — run the download helper)
+python download_models.py
+
+# 5. Start worker (port 9001)
+python -m worker.main
+
+# 6. Start gateway (port 3000)
+cd gateway && bun run src/index.ts
+
+# 7. (Optional) Start frontend for UI
+cd ../frontend && npm install && npm run dev
+```
 
 ## Configuration
 
-See `config.example.yaml` for all options:
+All behavior is controlled via `config.yaml`. The shipped config is tuned for **4GB VRAM** (e.g., RTX 3050 laptop) using:
+- Sherpa-ONNX Zipformer STT (~500MB)
+- Kokoro TTS (~256MB)
+- Silero VAD (~50MB)
+- Ollama with Phi-4 q4 (~3GB)
+- Wake word openwakeword (~100MB)
 
-| Section | Description |
-|---------|-------------|
-| `pipeline_mode` | `local` (modular) or `cloud` (Gemini Live) |
-| `stt.provider` | `sherpa-onnx`, `faster-whisper`, `vibevoice-asr` |
-| `tts.provider` | `kokoro`, `chatterbox`, `orpheus`, `piper` |
-| `llm.provider` | `ollama`, `openai-compat` |
-| `wake_word.provider` | `openwakeword` |
-| `personality.active` | `hacker`, `seductive`, `butler`, `drill-sergeant`, `stoner-philosopher` |
-| `ui.mode` | `web` or `headless` |
+Two pipeline modes:
+- `"local"` — all local providers (default)
+- `"cloud"` — Gemini Live relay (worker acts as audio bridge only)
 
----
+## Verdict
 
-## Features
+This is a **legitimate architectural skeleton with real scaffolding** — not legacy garbage. The structure is sound: provider ABCs, streaming pipeline, state machine, async I/O, WebSocket relay, and Svelte5 reactive UI are all properly organized.
 
-- ✅ Wake word activation ("Yo Gimp" default)
-- ✅ Keyboard/hotkey trigger
-- ✅ Streaming STT → LLM → TTS pipeline
-- ✅ ≤2 second latency target
-- ✅ Config-only provider swapping
-- ✅ 5 personality presets
-- ✅ 15-turn conversation memory
-- ✅ VRAM-aware model loading
-- ✅ WSL2 audio auto-detection
-- ✅ 3D VRM avatar with lip-sync (web mode)
-- ✅ Cloud API mode (Gemini Live) - Phase 3
-- ✅ Hermes Agent integration - Phase 3
-- ✅ OpenClaw skill - Phase 3
+However, it is **not production-functional** as shipped. The most critical gaps are:
+1. **STT gap**: Faster-Whisper is commented out; Sherpa-ONNX requires external model ONNX files to be downloaded
+2. **TTS gap**: Both Kokoro and Piper return silence or placeholder; actual text-to-speech inference is not wired
+3. **Connection gap**: Gateway doesn't auto-connect to the worker WebSocket server
+4. **Audio gap**: Activation sounds don't play; echo cancellation is a stub
 
----
-
-## Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| OS | WSL2, Linux, macOS | WSL2 on Windows 11 |
-| GPU | Integrated (CPU mode) | NVIDIA RTX 4050 (6GB VRAM) |
-| RAM | 8GB | 16GB |
-| Python | 3.11+ | 3.12 |
-| Node | Bun 1.0+ | Bun 1.5+ |
-
----
-
-## Documentation
-
-- `docs/setup-wsl2.md` - WSL2 audio configuration
-- `docs/setup-fedora.md` - Fedora Linux setup
-- `docs/setup-macos.md` - macOS setup
-- `docs/provider-guide.md` - Adding custom providers
-- `quickstart.md` - Detailed quickstart guide
-
----
-
-## License
-
-MIT - All dependencies must be MIT, Apache 2.0, or BSD licensed.
-
----
-
-## Status
-
-**Phase 2 Complete** - Foundational infrastructure ready.
-
-- [x] Phase 1: Setup
-- [x] Phase 2: Foundational (ABCs, state machine, audio, WebSocket, REST API)
-- [ ] Phase 3: User Story 1 (Wake Word Voice Conversation - MVP)
-- [ ] Phase 4: User Story 2 (Config-Only Provider Switching)
-- [ ] Phase 5: User Story 3 (Personality + Memory)
-- [ ] Phase 6: User Story 4 (3D Avatar + Web UI)
-- [ ] Phase 7: User Story 5 (Cloud API Mode)
-- [ ] Phase 8: User Story 6 (Agent Integration)
+The project sits at a **"Phase 2 / design-complete"** stage. The architecture is production-grade; the provider implementations are ~60-70% complete. A developer who can wire up the actual model inference calls and fix the gateway WebSocket connection would have a working voice AI system.

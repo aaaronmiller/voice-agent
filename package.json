@@ -1,0 +1,23 @@
+{
+  "name": "echo-node",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modular open-source voice AI interface",
+  "scripts": {
+    "dev": "concurrently --names 'WORKER,GATEWAY,FRONTEND' --prefix-colors 'green,blue,yellow' 'bun run worker' 'bun run gateway' 'bun run frontend'",
+    "worker": "cd worker && python main.py",
+    "gateway": "cd gateway && bun run src/index.ts",
+    "frontend": "cd frontend && bun run dev",
+    "setup": "./setup.sh",
+    "test": "./test.sh",
+    "lint:worker": "cd worker && ruff check .",
+    "lint:gateway": "cd gateway && bun run lint",
+    "lint:frontend": "cd frontend && bun run lint",
+    "lint": "bun run lint:worker && bun run lint:gateway && bun run lint:frontend",
+    "build:frontend": "cd frontend && bun run build",
+    "build:gateway": "cd gateway && bun build src/index.ts --target=bun --outdir dist"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

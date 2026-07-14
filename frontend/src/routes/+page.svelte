@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import Frame from '$lib/components/frame.svelte';
   import AvatarDisplay from '$lib/components/avatar-display.svelte';
   import Transcript from '$lib/components/transcript.svelte';
@@ -10,7 +10,7 @@
   import type { ThemeName } from '$lib/components/frame.svelte';
 
   // Component state
-  let settingsOpen = $state(false);
+  let settingsOpen = false;
   let selectedTheme: ThemeName = 'minimal';
   let avatarRef: HTMLDivElement | null = null;
   let avatarComponent: any = null;
@@ -107,7 +107,7 @@
 <div class="page">
   <Frame theme={selectedTheme}>
     <main class="main-content">
-      {/* Header */}
+      
       <header class="header">
         <div class="header-left">
           <h1 class="logo">Echo-Node</h1>
@@ -128,13 +128,13 @@
         </div>
       </header>
 
-      {/* Main content area */}
+      
       <div class="content-area">
-        {/* Avatar display */}
+        
         <div class="avatar-section" bind:this={avatarRef}>
           <AvatarDisplay bind:this={avatarComponent} />
 
-          {/* Waveform overlay during listening */}
+          
           {#if pipeline.isListening}
             <div class="waveform-overlay">
               <Waveform bars={48} height={80} />
@@ -142,7 +142,7 @@
           {/if}
         </div>
 
-        {/* Transcript panel */}
+        
         <aside class="transcript-section">
           <div class="transcript-header">
             <h2>Conversation</h2>
@@ -158,7 +158,7 @@
         </aside>
       </div>
 
-      {/* Control bar */}
+      
       <footer class="control-bar">
         <div class="controls">
           <button
@@ -196,7 +196,7 @@
           </button>
         </div>
 
-        {/* Connection status */}
+        
         <div class="connection-status">
           <span class="status-dot" class:connected={ws.isConnected}></span>
           <span class="status-text">
@@ -205,7 +205,7 @@
         </div>
       </footer>
 
-      {/* Error banner */}
+      
       {#if pipeline.error}
         <div class="error-banner">
           <span>{pipeline.error}</span>
@@ -217,7 +217,7 @@
         </div>
       {/if}
 
-      {/* Settings panel */}
+      
       {#if settingsOpen}
         <div class="settings-panel">
           <div class="settings-header">
