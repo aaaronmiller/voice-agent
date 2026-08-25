@@ -1,0 +1,8 @@
+{
+  "_meta": {
+    "file": "data/annotations.json",
+    "schema": "living-document-annotations-1.0.0",
+    "purpose": "Human and agent annotations attached to sections, proposals, and other targets."
+  },
+  "annotations": []
+}

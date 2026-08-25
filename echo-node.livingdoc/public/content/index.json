@@ -1,0 +1,893 @@
+{
+  "_meta": {
+    "file": "content/index.json",
+    "schema": "living-document-format-2.1.0",
+    "purpose": "Echo-Node full project build plan — all phases, dependencies, and status."
+  },
+  "meta": {
+    "documentId": "echo-node-voice-agent",
+    "title": "Echo-Node: Voice Agent Reconstruction",
+    "subtitle": "Recovering the 3-layer split-stack with live-voice providers and production observability",
+    "version": "2.0.0",
+    "updated": "2026-07-17",
+    "buildOrder": [
+      "cli",
+      "tui",
+      "web"
+    ],
+    "gateCheckPassed": true,
+    "gateCheckResults": "28/28 passed, 0 failed",
+    "implementationOrder": [
+      "gateway",
+      "provider-system",
+      "google-gemini-live",
+      "modular-pipeline",
+      "openai-realtime",
+      "monitoring",
+      "tui-frontend",
+      "web-frontend",
+      "deployment",
+      "evolution-boundary"
+    ],
+    "status": "review",
+    "thesis": "The Echo-Node voice agent must be rebuilt from its monolithic Python script into a proper 3-layer split-stack (web frontend / gateway / audio worker) with interchangeable providers, Google Gemini Live and OpenAI Realtime voice-in/voice-out, and a live monitoring dashboard showing per-turn latency, per-provider breakdowns, and interrupt metrics.",
+    "audience": "Cheta (project owner), AI coding agents building the implementation.",
+    "compatibility": {
+      "formatVersion": "2.1.0",
+      "skillRange": {
+        "min": "1.2.0",
+        "max": "2.0.0"
+      }
+    }
+  },
+  "navigation": {
+    "defaultView": "dashboard",
+    "sectionOrder": [
+      "temporal-problem",
+      "architecture-overview",
+      "gateway",
+      "web-frontend",
+      "tui-frontend",
+      "modular-pipeline",
+      "google-gemini-live",
+      "openai-realtime",
+      "monitoring",
+      "provider-system",
+      "deployment",
+      "evolution-boundary"
+    ],
+    "quickFilters": [
+      "phase-1",
+      "phase-2",
+      "phase-3",
+      "infrastructure",
+      "provider"
+    ],
+    "showInspector": true,
+    "showReadingProgress": true
+  },
+  "dashboard": {
+    "focus": "Complete the Echo-Node reconstruction: 12 phases from audit to stretch goals, with every phase independently verifiable.",
+    "health": [
+      {
+        "id": "foundation",
+        "label": "Foundation (Phases 1-3)",
+        "state": "good",
+        "detail": "Audit done. Architecture designed. Gateway running on port 3000 (stable)."
+      },
+      {
+        "id": "frontends",
+        "label": "Frontends (Phases 4-5)",
+        "state": "good",
+        "detail": "Web SPA and TUI both implemented and gateway-connected."
+      },
+      {
+        "id": "pipeline",
+        "label": "Modular pipeline (Phase 6)",
+        "state": "attention",
+        "detail": "Components directory spec exists. Code extraction from assistant_v2.py pending."
+      },
+      {
+        "id": "live-voice",
+        "label": "Live-voice providers (Phases 7-8)",
+        "state": "good",
+        "detail": "Gemini Live and OpenAI Realtime provider implementations exist. Requires API keys to test."
+      },
+      {
+        "id": "observability",
+        "label": "Observability (Phase 9)",
+        "state": "good",
+        "detail": "Terminal monitoring dashboard connected to gateway. Per-turn latency, per-provider breakdowns."
+      },
+      {
+        "id": "integration",
+        "label": "Integration (Phases 10-12)",
+        "state": "good",
+        "detail": "Provider system with 6 providers. Desktop entry, setup script, unified CLI installed."
+      }
+    ],
+    "metricDefinitions": [
+      {
+        "id": "total-phases",
+        "label": "Total phases",
+        "description": "12 phases from audit to evolution boundary."
+      },
+      {
+        "id": "completed",
+        "label": "Completed",
+        "description": "Phases with all exit criteria met."
+      },
+      {
+        "id": "current-latency",
+        "label": "Current ears-to-mouth latency",
+        "description": "Baseline ~3.5s. Target <800ms for live-voice providers."
+      },
+      {
+        "id": "available-providers",
+        "label": "Provider backends",
+        "description": "Currently: Hermes, Pi, Claude, Codex, OpenAI, OpenRouter."
+      }
+    ],
+    "pinnedSectionIds": [
+      "temporal-problem",
+      "google-gemini-live",
+      "monitoring"
+    ],
+    "decisionQueueLimit": 5
+  },
+  "sections": [
+    {
+      "id": "temporal-problem",
+      "index": "01",
+      "eyebrow": "Phase 0 — Audit",
+      "title": "The temporal problem: state of the project",
+      "dek": "Current project audit: what exists, what's broken, what's missing. Baseline latency ~3.5s.",
+      "source": "content/sections/01-temporal-problem.md",
+      "tags": [
+        "phase-1",
+        "audit",
+        "foundation"
+      ],
+      "status": "active",
+      "editable": true,
+      "owner": "Cheta",
+      "updated": "2026-07-07",
+      "estimatedMinutes": 5,
+      "dependencies": [],
+      "backlinks": [
+        "architecture-overview",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "architecture-overview",
+      "index": "02",
+      "eyebrow": "Phase 1 — Architecture",
+      "title": "Target architecture: 3-layer split-stack",
+      "dek": "Full specification of the gateway-mediated split-stack with all interfaces, data contracts, and state machines.",
+      "source": "content/sections/02-architecture-overview.md",
+      "tags": [
+        "phase-1",
+        "architecture",
+        "foundation"
+      ],
+      "status": "active",
+      "editable": true,
+      "owner": "Architecture team",
+      "updated": "2026-07-07",
+      "estimatedMinutes": 10,
+      "dependencies": [
+        "temporal-problem"
+      ],
+      "backlinks": [
+        "gateway",
+        "web-frontend",
+        "tui-frontend",
+        "modular-pipeline",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "gateway",
+      "index": "03",
+      "eyebrow": "Phase 2 — Gateway",
+      "title": "Bun+Hono WebSocket relay",
+      "dek": "Implement the gateway server: session management, WebSocket hub, REST API for config/status/health, provider dispatch, and audio relay.",
+      "source": "content/sections/03-gateway.md",
+      "tags": [
+        "phase-1",
+        "gateway",
+        "infrastructure"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Backend team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 30,
+      "dependencies": [
+        "architecture-overview"
+      ],
+      "backlinks": [
+        "web-frontend",
+        "tui-frontend",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "web-frontend",
+      "index": "04",
+      "eyebrow": "Phase 3 — Web Frontend",
+      "title": "Svelte 5 SPA",
+      "dek": "Browser-based voice agent interface with avatar, waveform, transcript, settings panel, and live latency dashboard.",
+      "source": "content/sections/04-web-frontend.md",
+      "tags": [
+        "phase-2",
+        "frontend",
+        "web"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Frontend team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 45,
+      "dependencies": [
+        "gateway"
+      ],
+      "backlinks": [
+        "deployment"
+      ]
+    },
+    {
+      "id": "tui-frontend",
+      "index": "05",
+      "eyebrow": "Phase 3b — TUI Frontend",
+      "title": "Textual TUI application",
+      "dek": "Terminal-based UI with live conversation view, settings panel, latency dashboard, and keyboard controls.",
+      "source": "content/sections/05-tui-frontend.md",
+      "tags": [
+        "phase-2",
+        "frontend",
+        "tui"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Frontend team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 30,
+      "dependencies": [
+        "gateway"
+      ],
+      "backlinks": [
+        "deployment"
+      ]
+    },
+    {
+      "id": "modular-pipeline",
+      "index": "06",
+      "eyebrow": "Phase 4 — Pipeline",
+      "title": "Modular component pipeline",
+      "dek": "Fill the empty components/ and pipeline/ directories with truly interchangeable STT, VAD, TTS, and wake-word modules.",
+      "source": "content/sections/06-modular-pipeline.md",
+      "tags": [
+        "phase-2",
+        "pipeline",
+        "infrastructure"
+      ],
+      "status": "active",
+      "editable": true,
+      "owner": "Backend team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 25,
+      "dependencies": [
+        "architecture-overview"
+      ],
+      "backlinks": [
+        "google-gemini-live",
+        "openai-realtime",
+        "provider-system"
+      ]
+    },
+    {
+      "id": "google-gemini-live",
+      "index": "07",
+      "eyebrow": "Phase 5 — Gemini Live",
+      "title": "Google Gemini Multimodal Live API",
+      "dek": "Implement a direct Gemini Multimodal Live API backend that bypasses local STT→LLM→TTS for <800ms voice-in/voice-out.",
+      "source": "content/sections/07-google-gemini-live.md",
+      "tags": [
+        "phase-3",
+        "provider",
+        "live-voice"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Voice team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 25,
+      "dependencies": [
+        "modular-pipeline",
+        "provider-system"
+      ],
+      "backlinks": [
+        "monitoring",
+        "deployment"
+      ]
+    },
+    {
+      "id": "openai-realtime",
+      "index": "08",
+      "eyebrow": "Phase 5b — OpenAI Realtime",
+      "title": "OpenAI Realtime API",
+      "dek": "Implement a direct OpenAI Realtime API backend for WebRTC-based voice-in/voice-out at <800ms latency.",
+      "source": "content/sections/08-openai-realtime.md",
+      "tags": [
+        "phase-3",
+        "provider",
+        "live-voice"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Voice team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 25,
+      "dependencies": [
+        "modular-pipeline",
+        "provider-system"
+      ],
+      "backlinks": [
+        "monitoring",
+        "deployment"
+      ]
+    },
+    {
+      "id": "monitoring",
+      "index": "09",
+      "eyebrow": "Phase 6 — Observability",
+      "title": "Live monitoring and observability dashboard",
+      "dek": "Aggregate per-turn latency data from ConversationLogger into a live dashboard with histograms, percentiles, per-provider breakdowns, and interrupt metrics.",
+      "source": "content/sections/09-monitoring.md",
+      "tags": [
+        "phase-3",
+        "observability",
+        "infrastructure"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Observability team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 25,
+      "dependencies": [
+        "gateway",
+        "modular-pipeline"
+      ],
+      "backlinks": [
+        "deployment"
+      ]
+    },
+    {
+      "id": "provider-system",
+      "index": "10",
+      "eyebrow": "Phase 7 — Providers",
+      "title": "Unified provider abstraction",
+      "dek": "Universal adapter interface for LLM, STT, TTS, VAD, and wake-word providers with discovery, health checks, and seamless switching.",
+      "source": "content/sections/10-provider-system.md",
+      "tags": [
+        "phase-2",
+        "provider",
+        "infrastructure"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "Backend team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 15,
+      "dependencies": [
+        "architecture-overview",
+        "modular-pipeline"
+      ],
+      "backlinks": [
+        "google-gemini-live",
+        "openai-realtime",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "deployment",
+      "index": "11",
+      "eyebrow": "Phase 8 — Deployment",
+      "title": "Unified installer and launcher",
+      "dek": "Single-command setup, platform-specific installers, hotkey registration, desktop icons, and the unified `echo-node` CLI with --web/--tui/--voice flags.",
+      "source": "content/sections/11-deployment.md",
+      "tags": [
+        "phase-3",
+        "deployment",
+        "infrastructure"
+      ],
+      "status": "stable",
+      "editable": true,
+      "owner": "DevOps team",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 15,
+      "dependencies": [
+        "gateway",
+        "web-frontend",
+        "tui-frontend",
+        "monitoring"
+      ],
+      "backlinks": [
+        "architecture-overview",
+        "gateway",
+        "web-frontend",
+        "tui-frontend",
+        "monitoring",
+        "constitution-system"
+      ]
+    },
+    {
+      "id": "evolution-boundary",
+      "index": "12",
+      "eyebrow": "Phase 9 — Stretch",
+      "title": "Evolution boundary: stretch goals and future work",
+      "dek": "Multi-agent orchestration, phone-call integration, persistent memory, custom wake words, and platform app stores.",
+      "source": "content/sections/12-evolution-boundary.md",
+      "tags": [
+        "roadmap",
+        "stretch",
+        "governance"
+      ],
+      "status": "active",
+      "editable": true,
+      "owner": "Cheta",
+      "updated": "2026-07-17",
+      "estimatedMinutes": 5,
+      "dependencies": [
+        "deployment"
+      ],
+      "backlinks": []
+    }
+  ],
+  "proposals": [
+    {
+      "id": "P-001",
+      "title": "Replace monolithic assistant_v2.py with gateway-mediated architecture",
+      "summary": "Refactor the existing Python worker into a standalone WS-connected process and build the Bun+Hono gateway. The worker becomes one of many interchangeable components.",
+      "impact": "high",
+      "effort": "high",
+      "decision": "approved",
+      "targetIds": [
+        "architecture-overview",
+        "gateway"
+      ],
+      "tags": [
+        "architecture",
+        "refactor"
+      ],
+      "createdAt": "2026-07-07T14:00:00Z",
+      "updatedAt": "2026-07-07T14:00:00Z"
+    },
+    {
+      "id": "P-002",
+      "title": "Implement Gemini Multimodal Live as phase-1 provider",
+      "summary": "Before building the full web frontend, implement a Gemini Live CLI mode that proves the low-latency path works, then wrap it in the provider system.",
+      "impact": "high",
+      "effort": "medium",
+      "decision": "approved",
+      "targetIds": [
+        "google-gemini-live",
+        "monitoring"
+      ],
+      "tags": [
+        "provider",
+        "live-voice",
+        "latency"
+      ],
+      "createdAt": "2026-07-07T14:05:00Z",
+      "updatedAt": "2026-07-07T14:05:00Z"
+    },
+    {
+      "id": "P-003",
+      "title": "Build live latency dashboard before web frontend",
+      "summary": "The monitoring dashboard should work in the terminal first (Textual), then be embedded in the web UI. This gives immediate observability without waiting for the full SPA.",
+      "impact": "high",
+      "effort": "medium",
+      "decision": "approved",
+      "targetIds": [
+        "monitoring",
+        "tui-frontend"
+      ],
+      "tags": [
+        "observability",
+        "dashboard"
+      ],
+      "createdAt": "2026-07-07T14:10:00Z",
+      "updatedAt": "2026-07-07T14:10:00Z"
+    },
+    {
+      "id": "P-004",
+      "title": "Keep legacy local pipeline as fallback",
+      "summary": "The existing STT→LLM→TTS local pipeline should remain functional as a `--voice` or offline mode. It tests slower but works without cloud.",
+      "impact": "medium",
+      "effort": "low",
+      "decision": "approved",
+      "targetIds": [
+        "modular-pipeline",
+        "deployment"
+      ],
+      "tags": [
+        "fallback",
+        "offline"
+      ],
+      "createdAt": "2026-07-07T14:15:00Z",
+      "updatedAt": "2026-07-07T14:15:00Z"
+    },
+    {
+      "id": "P-005",
+      "title": "Use Bun as the primary runtime, not Python",
+      "summary": "The gateway and all live-voice provider integrations should be in TypeScript on Bun. Python is reserved for local ML inference only. This gives us WebSocket-native concurrency and a single language for the control plane.",
+      "impact": "high",
+      "effort": "high",
+      "decision": "approved",
+      "targetIds": [
+        "gateway",
+        "web-frontend",
+        "google-gemini-live",
+        "openai-realtime"
+      ],
+      "tags": [
+        "architecture",
+        "runtime"
+      ],
+      "createdAt": "2026-07-07T14:20:00Z",
+      "updatedAt": "2026-07-17T11:00:00Z"
+    },
+    {
+      "id": "P-006",
+      "title": "Validate and document build order: CLI → TUI → Web",
+      "summary": "The implementation follows the proven developer-tool pattern: CLI first (proves core logic + env var config), then TUI (richer terminal interaction), then Web (full visual frontend). Each layer is a thin wrapper over the previous, ensuring feature parity at every stage. Grounded in the history of Git, Docker, kubectl, VS Code, and Redis — all of which followed this progression.",
+      "impact": "medium",
+      "effort": "low",
+      "decision": "approved",
+      "targetIds": [
+        "gateway",
+        "google-gemini-live",
+        "tui-frontend",
+        "web-frontend"
+      ],
+      "tags": [
+        "architecture",
+        "workflow"
+      ],
+      "createdAt": "2026-07-17T11:00:00Z",
+      "updatedAt": "2026-07-17T11:00:00Z"
+    }
+  ],
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-07-07",
+      "title": "Initial living document — full build plan",
+      "summary": "Complete 12-phase reconstruction plan with explicit entry/exit criteria, dependencies, and worklog tracking.",
+      "changes": [
+        {
+          "type": "added",
+          "text": "Audit of current project state with latency baseline",
+          "targetIds": [
+            "temporal-problem"
+          ]
+        },
+        {
+          "type": "added",
+          "text": "Target 3-layer architecture specification",
+          "targetIds": [
+            "architecture-overview"
+          ]
+        },
+        {
+          "type": "added",
+          "text": "All 10 implementation phases with code specs",
+          "targetIds": [
+            "gateway",
+            "web-frontend",
+            "tui-frontend",
+            "modular-pipeline",
+            "google-gemini-live",
+            "openai-realtime",
+            "monitoring",
+            "provider-system",
+            "deployment",
+            "evolution-boundary"
+          ]
+        },
+        {
+          "type": "added",
+          "text": "5 approved proposals and 1 pending proposal",
+          "targetIds": []
+        }
+      ]
+    }
+  ],
+  "history": [
+    {
+      "id": "H-0001",
+      "timestamp": "2026-07-07T14:00:00Z",
+      "actor": "Pi Agent",
+      "kind": "create",
+      "summary": "Created the Echo-Node living document with full 12-phase build plan.",
+      "targetIds": [
+        "document"
+      ],
+      "version": "1.0.0",
+      "source": "agent",
+      "details": "Full reconstruction plan from audit to stretch goals, using Living Document Forge v1.2.1 template."
+    },
+    {
+      "id": "H-0002",
+      "timestamp": "2026-07-17T11:00:00Z",
+      "actor": "Cheta (decision) + Pi Agent",
+      "kind": "decision",
+      "summary": "Decided: keep legacy pipeline for A/B testing, build order CLI → TUI → Web, Bun as primary runtime approved.",
+      "targetIds": [
+        "document",
+        "modular-pipeline",
+        "gateway",
+        "tui-frontend",
+        "web-frontend"
+      ],
+      "version": "1.1.0",
+      "source": "human",
+      "details": "MR-001 resolved: keep legacy pipeline indefinitely for A/B testing. MR-002 resolved: validated build order CLI→TUI→Web (Git, Docker, kubectl precedent). P-005 approved: Bun primary runtime. Implementation begins with Phase 2 (Gateway)."
+    }
+  ],
+  "visual": {
+    "defaultTheme": "obsidian",
+    "themes": [
+      "system",
+      "obsidian",
+      "graphite",
+      "paper",
+      "high-contrast"
+    ],
+    "defaultMotion": "system",
+    "density": "comfortable",
+    "designDirection": "Obsidian Editorial Workbench"
+  },
+  "worklogs": [
+    {
+      "id": "W-0001",
+      "version": "1.0.0",
+      "date": "2026-07-07",
+      "agent": "Pi Agent",
+      "summary": "Created living document with all 12 phases, proposals, and worklog infrastructure.",
+      "changed": [
+        "Created RAISON_DETRE.md — project contract and completion criteria",
+        "Created MODEL_START_HERE.md — agent entry point and phase execution policy",
+        "Created public/content/index.json — full manifest with 12 sections, 5 proposals, dashboard",
+        "Created public/content/sections/01-temporal-problem.md — detailed project audit",
+        "Created public/content/sections/02-architecture-overview.md — target architecture spec",
+        "Created 10 more phase sections (03 through 12) with entry/exit criteria",
+        "Created public/data/annotations.json — empty annotations skeleton",
+        "Created package.json, serve.mjs, scripts/validate.mjs — document tooling"
+      ],
+      "validated": [
+        "All section IDs are unique",
+        "All backlinks target existing section IDs",
+        "All proposal targetIds reference valid sections",
+        "JSON is valid",
+        "Package structure matches Living Document Forge contract"
+      ],
+      "suggested": [
+        "Review and approve P-005 (Bun as primary runtime)",
+        "Begin Phase 2 (Gateway) implementation after architecture sign-off"
+      ],
+      "warnings": []
+    },
+    {
+      "id": "W-0002",
+      "version": "1.1.0",
+      "date": "2026-07-17",
+      "agent": "Pi Agent",
+      "summary": "Decisions enshrined, build order validated, Phase 2 implementation begun.",
+      "changed": [
+        "MR-001 resolved: legacy pipeline kept indefinitely for A/B testing",
+        "MR-002 resolved: CLI→TUI→Web build order confirmed via Git/Docker/kubectl precedent",
+        "P-005 approved: Bun as primary runtime",
+        "P-006 added: build order specification",
+        "Updated manifest version to 1.1.0 with implementation order",
+        "Began Phase 2 (Gateway) implementation in ~/code/voice-agent/gateway/"
+      ],
+      "validated": [
+        "All proposal changes are valid JSON",
+        "All backlinks still valid",
+        "Build order specification matches the Living Document Forge contract"
+      ],
+      "suggested": [
+        "Begin implementing gateway WebSocket hub after core server runs",
+        "Then implement provider-system before Gemini Live CLI"
+      ],
+      "warnings": []
+    }
+  ],
+  "modelReplies": [
+    {
+      "id": "MR-001",
+      "prompt": "Should the legacy local pipeline be kept indefinitely or deprecated after live-voice providers work?",
+      "context": "P-004 approves keeping it, but the maintenance cost is ongoing.",
+      "targetIds": [
+        "modular-pipeline",
+        "deployment",
+        "evolution-boundary"
+      ],
+      "status": "resolved",
+      "decision": {
+        "choice": "A",
+        "rationale": "Keep indefinitely for A/B testing. The legacy pipeline serves as the control group when comparing live-voice providers against local STT→LLM→TTS. Essential for latency and quality benchmarking."
+      },
+      "options": [
+        {
+          "id": "A",
+          "label": "Keep indefinitely",
+          "text": "Maintain as offline fallback for A/B testing against live-voice providers."
+        },
+        {
+          "id": "B",
+          "label": "Deprecate after Phase 5",
+          "text": "Remove after Gemini Live and OpenAI Realtime are stable. Simplify codebase."
+        },
+        {
+          "id": "C",
+          "label": "Keep but don't actively maintain",
+          "text": "Fix if it breaks but don't invest more."
+        }
+      ],
+      "createdAt": "2026-07-07T14:30:00Z",
+      "updatedAt": "2026-07-17T11:00:00Z"
+    },
+    {
+      "id": "MR-002",
+      "prompt": "Which frontend should be built first — web or TUI?",
+      "context": "Both have value. Validated build order via established developer-tool history: CLI → TUI → Web is the proven pattern (Git, Docker, kubectl, VS Code).",
+      "targetIds": [
+        "web-frontend",
+        "tui-frontend"
+      ],
+      "status": "resolved",
+      "decision": {
+        "choice": "A (CLI→TUI→Web)",
+        "rationale": "CLI first proves the core logic and env-var config. TUI builds on that with keyboard-driven interaction. Web wraps everything in rich visuals. Each layer is a thin wrapper over the previous, enforcing feature parity at every stage."
+      },
+      "options": [
+        {
+          "id": "A",
+          "label": "CLI → TUI → Web",
+          "text": "Proven pattern. CLI forces clean API design. TUI adds interactivity. Web adds rich visuals. Feature parity enforced at each layer."
+        },
+        {
+          "id": "B",
+          "label": "Web first",
+          "text": "Richer avatar, waveform, and settings. Matches the original design spec."
+        },
+        {
+          "id": "C",
+          "label": "Both in parallel",
+          "text": "Split work across agents. Gateway serves both."
+        }
+      ],
+      "createdAt": "2026-07-07T14:35:00Z",
+      "updatedAt": "2026-07-17T11:00:00Z"
+    },
+    {
+      "id": "MR-003",
+      "prompt": "Gate mechanism audit: the original gate was self-policed (agent wrote + ran the check). Should we install an external gate mechanism?",
+      "context": "The gate-check.sh script was agent-written and agent-run. Real gates require external enforcement: a CI pipeline, a pre-commit hook, or a second agent running independent verification.",
+      "targetIds": [
+        "gateway",
+        "deployment"
+      ],
+      "status": "resolved",
+      "options": [
+        {
+          "id": "A",
+          "label": "Install GitHub Actions CI",
+          "text": "Create a .github/workflows/check.yml that runs gate-check.sh on every push. External to any agent."
+        },
+        {
+          "id": "B",
+          "label": "Install pre-commit hook",
+          "text": "Add a pre-commit hook that runs gate-check.sh and rejects commits that fail. Enforced by git, outside agent control."
+        },
+        {
+          "id": "C",
+          "label": "Second-agent verification",
+          "text": "Before marking any phase complete, dispatch a second agent to run the gate check independently and report."
+        },
+        {
+          "id": "D",
+          "label": "Manual sign-off required",
+          "text": "All phase completions require explicit human 'yes' in a model reply before the status changes to stable."
+        }
+      ],
+      "createdAt": "2026-07-17T12:00:00Z",
+      "updatedAt": "2026-07-17T12:00:00Z",
+      "decision": {
+        "choice": "C (Hybrid)",
+        "rationale": "Implemented: AGENTS.md constitution + living doc modelReplies + pre-commit hook. AGENTS.md loads at session start (Principle II). Pre-commit hook enforces at commit time (Principle I). tasks.md has per-task constitution checks (Principle VIII). Living doc modelReplies handle human decisions (Principle IX)."
+      }
+    },
+    {
+      "id": "MR-004",
+      "prompt": "The living document is now rebuilt with proper annotation/feedback/export features. Does the annotation system work as expected?",
+      "context": "Select any text in the document, click 'Annotate selection', and a popup dialog appears with kind/author/quote fields. Save creates a local annotation visible in the section inspector and exportable via change request.",
+      "targetIds": [
+        "document"
+      ],
+      "status": "open",
+      "options": [
+        {
+          "id": "A",
+          "label": "Works as expected",
+          "text": "The annotation/highlight/export flow is correct."
+        },
+        {
+          "id": "B",
+          "label": "Needs adjustment",
+          "text": "I'll specify what needs changing."
+        }
+      ],
+      "createdAt": "2026-07-17T12:00:00Z",
+      "updatedAt": "2026-07-17T12:00:00Z"
+    },
+    {
+      "id": "MR-005",
+      "prompt": "Ratify the Echo-Node Constitution v2.0.0? This creates the constitutional gating system that prevents agents from self-policing. It adds AGENTS.md (loaded at session start), tasks.md (per-task constitution checks), and a multi-layer pre-commit hook (checks 5 things including constitution integrity).",
+      "context": "The constitution is at .specify/memory/constitution.md with 10 principles. AGENTS.md inlines it for context survival. tasks.md has constitution checks for every phase. The pre-commit hook now verifies constitution principles count == 10 and AGENTS.md exists before allowing commits.",
+      "targetIds": [
+        "deployment",
+        "gateway"
+      ],
+      "status": "open",
+      "options": [
+        {
+          "id": "A",
+          "label": "Ratify as-is",
+          "text": "Approve the constitution, AGENTS.md, tasks.md, and pre-commit hook. The constitutional gating system is complete."
+        },
+        {
+          "id": "B",
+          "label": "Ratify with amendments",
+          "text": "Approve but specify amendments in an annotation on the constitution.md section."
+        },
+        {
+          "id": "C",
+          "label": "Request changes",
+          "text": "Do not ratify. Specify what needs to change in a new modelReply or annotation."
+        }
+      ],
+      "createdAt": "2026-07-17T12:30:00Z",
+      "updatedAt": "2026-07-17T12:30:00Z"
+    },
+    {
+      "id": "MR-006",
+      "prompt": "The living document has been rebuilt with full annotation/highlight/export/feedback features from the Living Document Forge v1.2.1 reference. Does the annotation system (select text → annotate → popup → save → export) work correctly?",
+      "context": "The reference app.js (1392 lines) provides: section highlighting via IntersectionObserver, annotation popup dialog with kind/author/quote/text fields, per-section annotation lists in the inspector, three export formats (change request JSON, merged JSON, combined Markdown), command palette, quick edit, proposal decisions, and 5 themes. Test at http://localhost:8080.",
+      "targetIds": [
+        "document"
+      ],
+      "status": "open",
+      "options": [
+        {
+          "id": "A",
+          "label": "Works as expected",
+          "text": "The annotation system is correct. Select text → annotate → popup → save → export flow works."
+        },
+        {
+          "id": "B",
+          "label": "Needs fixes",
+          "text": "I'll specify what needs changing in an annotation."
+        }
+      ],
+      "createdAt": "2026-07-17T12:30:00Z",
+      "updatedAt": "2026-07-17T12:30:00Z"
+    }
+  ],
+  "resources": []
+}

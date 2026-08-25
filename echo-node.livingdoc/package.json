@@ -1,0 +1,14 @@
+{
+  "name": "echo-node-living-document",
+  "version": "1.0.0",
+  "description": "Echo-Node Voice Agent — living build plan",
+  "type": "module",
+  "scripts": {
+    "dev": "node serve.mjs",
+    "start": "node serve.mjs",
+    "validate": "node scripts/validate.mjs",
+    "build": "echo 'Static export: copy public/ directory'"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

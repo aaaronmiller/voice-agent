@@ -1,0 +1,19 @@
+# BabelFish Profiles — named configurations
+active: ''
+profiles:
+- name: Raccoon Standard
+  template: 0
+  description: 'v2 stack: Whisper → Hermes → Kokoro TTS + raccoon avatar. Reliable
+    daily driver.'
+  settings: {}
+- name: Gemini Thinker
+  template: 2
+  description: 'Google Gemini Multimodal Live API: voice-in→voice-out, no STT/TTS
+    overhead. ~500ms-2s latency.'
+  settings: {}
+- name: Raccoon Fast
+  template: 0
+  description: Fast TTS, no barge-in
+  settings:
+    tts.speed: '1.6'
+    barge_in.enabled: 'false'

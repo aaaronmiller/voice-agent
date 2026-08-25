@@ -1,16 +1,265 @@
 #!/usr/bin/env python3
-"""Echo-Node Launcher — unified chooser for all voice agent modes.
+"""BabelFish Launcher — unified chooser for all voice agent profiles.
 
 Quick commands:
-  echo-node                    # launch the GUI chooser
-  echo-node --list             # list incarnations
-  echo-node --start 2          # start Google Gemini
-  echo-node --stop             # stop whatever is running
-  echo-node --status           # check what's running
+  echo-node                          # launch the GUI chooser
+  echo-node --list                   # list incarnation templates
+  echo-node --start 2                # start template #2 directly
+  echo-node --stop                   # stop whatever is running
+  echo-node --status                 # check what's running
+
+  echo-node profile list             # list saved profiles
+  echo-node profile create NAME --template 0 --desc "..." --key value
+  echo-node profile delete NAME
+  echo-node profile rename OLD NEW
+  echo-node profile set NAME key=value [key=value...]
+  echo-node profile launch NAME      # launch a profile by name
+  echo-node profile show NAME        # show profile details
 """
 
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from incarnations.chooser import _cli_main
+import sys
+import os
 
-_cli_main()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from incarnations.chooser import _cli_main as _old_cli_main
+
+
+def _main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "profile":
+        _profile_cli()
+    else:
+        _old_cli_main()
+
+
+def _profile_cli():
+    from incarnations.profiles import profile_manager
+    pm = profile_manager()
+
+    # Parse sub-command and options
+    args = sys.argv[2:] if len(sys.argv) > 2 else []
+    if not args or args[0] == "--help" or args[0] == "help":
+        _print_profile_help()
+        return
+
+    cmd = args[0]
+
+    if cmd == "list":
+        print(f"Profiles ({len(pm.profiles)}):")
+        for p in pm.profiles:
+            tmpl_name = "(unknown)"
+            if 0 <= p.template < len(pm._template_mgr.incarnations):
+                tmpl_name = pm._template_mgr.incarnations[p.template].name
+            active = " ▶ ACTIVE" if (p.name == pm.active and pm.is_running()) else ""
+            print(f"  {p.name}{active}")
+            print(f"       Template: #{p.template} {tmpl_name}")
+            print(f"       Desc: {p.description}")
+            if p.settings:
+                print(f"       Overrides: {len(p.settings)} settings")
+            print()
+
+    elif cmd == "create":
+        if len(args) < 2:
+            print("Usage: echo-node profile create NAME [--template N] [--desc DESC] [--key value ...]", file=sys.stderr)
+            sys.exit(1)
+        name = args[1]
+        template = 0
+        desc = ""
+        settings = {}
+        i = 2
+        while i < len(args):
+            if args[i] == "--template":
+                i += 1
+                template = int(args[i]) if i < len(args) else 0
+            elif args[i] == "--desc":
+                i += 1
+                desc = args[i] if i < len(args) else ""
+            elif args[i].startswith("--"):
+                # --key value pair
+                key = args[i][2:]
+                i += 1
+                val = args[i] if i < len(args) else ""
+                settings[key] = val
+            else:
+                break
+            i += 1
+        err = pm.create(name, template, desc, settings)
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Created profile {name!r}")
+
+    elif cmd == "delete":
+        if len(args) < 2:
+            print("Usage: echo-node profile delete NAME", file=sys.stderr)
+            sys.exit(1)
+        name = args[1]
+        err = pm.delete(name)
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Deleted profile {name!r}")
+
+    elif cmd == "rename":
+        if len(args) < 3:
+            print("Usage: echo-node profile rename OLD_NAME NEW_NAME", file=sys.stderr)
+            sys.exit(1)
+        err = pm.rename(args[1], args[2])
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Renamed to {args[2]!r}")
+
+    elif cmd == "set":
+        if len(args) < 3:
+            print("Usage: echo-node profile set NAME key=value [key=value ...]", file=sys.stderr)
+            sys.exit(1)
+        name = args[1]
+        updates = {}
+        for kv in args[2:]:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                updates[k] = v
+        err = pm.update_settings(name, updates)
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Updated {len(updates)} setting(s) for {name!r}")
+
+    elif cmd == "launch":
+        if len(args) < 2:
+            print("Usage: echo-node profile launch NAME", file=sys.stderr)
+            sys.exit(1)
+        name = args[1]
+        err = pm.launch(name)
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Launched profile {name!r}")
+        print(f"  Template: #{pm._template_mgr.incarnations[pm.get(name).template].name}")
+        if pm._process:
+            print(f"  PID: {pm._process.pid}")
+
+    elif cmd == "show":
+        if len(args) < 2:
+            print("Usage: echo-node profile show NAME", file=sys.stderr)
+            sys.exit(1)
+        p = pm.get(args[1])
+        if not p:
+            print(f"Profile {args[1]!r} not found", file=sys.stderr)
+            sys.exit(1)
+        tmpl_name = "(unknown)"
+        if 0 <= p.template < len(pm._template_mgr.incarnations):
+            tmpl_name = pm._template_mgr.incarnations[p.template].name
+        print(f"Name:        {p.name}")
+        print(f"Template:    #{p.template} {tmpl_name}")
+        print(f"Description: {p.description}")
+        print(f"Settings:")
+        if p.settings:
+            for k, v in p.settings.items():
+                print(f"    {k} = {v}")
+        else:
+            print(f"    (none — using all template defaults)")
+
+    elif cmd == "interactive":
+        _interactive_shell(pm)
+
+    else:
+        print(f"Unknown profile command: {cmd}", file=sys.stderr)
+        _print_profile_help()
+        sys.exit(1)
+
+
+def _print_profile_help():
+    print("""BabelFish Profile Manager — save, switch, and launch voice agent configurations.
+
+Commands:
+  profile list              List all saved profiles
+  profile create NAME ...   Create a new profile
+  profile delete NAME       Delete a profile
+  profile rename OLD NEW    Rename a profile
+  profile set NAME k=v ...  Update one or more settings
+  profile launch NAME       Launch a profile (stops current first)
+  profile show NAME         Show profile details
+  profile interactive        Interactive TUI (Textual)
+
+Create options:
+  --template N   Template index (0-3, default: 0)
+                  0=Original v2, 1=LiveKit Cloud, 2=Google Gemini, 3=MuseTalk
+  --desc TEXT    Description for the profile
+  --KEY VALUE    Any setting override (e.g., --tts.speed 1.6 --barge_in.enabled false)
+
+Examples:
+  echo-node profile create "Raccoon Fast" --template 0 --desc "Fast TTS" --tts.speed 1.6
+  echo-node profile create "Gemini Brain" --template 2
+  echo-node profile set "Raccoon Fast" backend.provider=openai
+  echo-node profile launch "Raccoon Fast"
+  echo-node profile list
+""")
+
+
+def _interactive_shell(pm):
+    """Simple interactive shell for profile management."""
+    print("BabelFish Profile Shell. Type 'help', 'list', 'create', 'launch', or 'quit'.")
+    while True:
+        try:
+            line = input("profiles> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not line:
+            continue
+        parts = line.split()
+        cmd = parts[0].lower()
+        if cmd in ("q", "quit", "exit"):
+            break
+        elif cmd == "help":
+            _print_profile_help()
+        elif cmd == "list":
+            for p in pm.profiles:
+                active = " ▶ RUNNING" if (p.name == pm.active and pm.is_running()) else ""
+                suffix = f" [{pm._template_mgr.incarnations[p.template].name}]" if p.template < len(pm._template_mgr.incarnations) else ""
+                print(f"  {p.name}{active}{suffix}")
+        elif cmd == "create":
+            if len(parts) < 2:
+                print("Usage: create NAME [template=0]")
+                continue
+            name = parts[1]
+            tmpl = int(parts[2]) if len(parts) > 2 else 0
+            err = pm.create(name, tmpl)
+            if err:
+                print(f"Error: {err}")
+            else:
+                print(f"Created {name!r}")
+        elif cmd == "delete":
+            if len(parts) < 2:
+                print("Usage: delete NAME")
+                continue
+            err = pm.delete(parts[1])
+            if err:
+                print(f"Error: {err}")
+            else:
+                print(f"Deleted {parts[1]!r}")
+        elif cmd == "launch":
+            if len(parts) < 2:
+                print("Usage: launch NAME")
+                continue
+            err = pm.launch(parts[1])
+            if err:
+                print(f"Error: {err}")
+            else:
+                print(f"Launched {parts[1]!r}")
+        elif cmd == "stop":
+            pm.stop()
+            print("Stopped.")
+        elif cmd == "status":
+            if pm.is_running():
+                print(f"▶ {pm.active} (PID={pm._process.pid}, uptime={pm.uptime_seconds:.0f}s)")
+            else:
+                print("⏹  Nothing running")
+        else:
+            print(f"Unknown: {cmd}")
+
+
+if __name__ == "__main__":
+    _main()

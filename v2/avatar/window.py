@@ -469,6 +469,9 @@ class AvatarWindow(QWidget):
         self._resize_start_size: QSizeF | None = None
         self.RESIZE_MARGIN = 8  # px from edge to detect resize
 
+        # ── Assistant state for visual indicators ──
+        self._assistant_state: str = "idle"
+
         # ── Frame style state (HSL) ──
         self._frame_shape = DEFAULT_SHAPE
         self._hue = DEFAULT_HUE
@@ -568,6 +571,10 @@ class AvatarWindow(QWidget):
         # Auto-show debug waveform on startup
         self._debug_enabled = True
         self._debug_panel.show()
+        # ── Debug panel refresh timer (10 fps when visible) ──
+        self._debug_timer = QTimer(self)
+        self._debug_timer.setInterval(100)
+        self._debug_timer.timeout.connect(self._debug_repaint)
         self._debug_timer.start()
 
         # ── Control bar ──
@@ -623,12 +630,6 @@ class AvatarWindow(QWidget):
         self._pulse_timer.setInterval(33)  # ~30 fps
         self._pulse_timer.timeout.connect(self._on_pulse_tick)
 
-        # ── Debug panel refresh timer (10 fps when visible) ──
-        self._debug_enabled = True
-        self._debug_timer = QTimer(self)
-        self._debug_timer.setInterval(100)
-        self._debug_timer.timeout.connect(self._debug_repaint)
-
         # Settings popup
         self._settings_popup: SettingsPopup | None = None
 
@@ -643,24 +644,50 @@ class AvatarWindow(QWidget):
         return hsl_css(self._hue, max(20, self._saturation), bg_lig, self._frame_opacity)
 
     def _get_border_color(self) -> str:
-        """Frame border: bright with moderate alpha."""
+        """Frame border: bright with moderate alpha.
+        Overrides to bright green when listening, cyan when responding."""
+        if self._assistant_state == "listening":
+            return "rgba(60, 255, 120, 0.8)"
+        if self._assistant_state == "transcribing":
+            return "rgba(240, 210, 60, 0.8)"
+        if self._assistant_state == "working":
+            return "rgba(240, 160, 40, 0.8)"
+        if self._assistant_state == "responding":
+            return "rgba(60, 200, 255, 0.8)"
         b_lig = min(100, self._lightness + 25)
         b_alpha = max(0.15, 0.25 + (self._lightness / 200))
         return hsl_css(self._hue, self._saturation, b_lig, b_alpha)
 
     def _get_glow_color(self) -> QColor:
-        """The glow shadow colour (QColor, not CSS)."""
+        """The glow shadow colour (QColor, not CSS).
+        Overrides to bright state colors when assistant is active."""
         c = QColor()
-        glow_lig = min(100, self._lightness + 10)
         intensity = max(0.01, self._glow_intensity / 100)
+        alpha = max(0, min(255, int(180 * intensity)))
+        if self._assistant_state == "listening":
+            c.setHsl(130, 255, 140, alpha)
+            return c
+        if self._assistant_state == "transcribing":
+            c.setHsl(50, 230, 150, alpha)
+            return c
+        if self._assistant_state == "working":
+            c.setHsl(35, 230, 150, alpha)
+            return c
+        if self._assistant_state == "responding":
+            c.setHsl(200, 230, 150, alpha)
+            return c
+        glow_lig = min(100, self._lightness + 10)
         c.setHsl(self._hue % 360,
                  max(0, min(255, self._saturation * 255 // 100)),
                  max(0, min(255, glow_lig * 255 // 100)),
-                 max(0, min(255, int(180 * intensity))))
+                 alpha)
         return c
 
     def _get_glow_blur(self) -> int:
         """Map glow_intensity to blur radius: 5-60px."""
+        # Bigger glow when active
+        if self._assistant_state != "idle":
+            return max(20, int(self._glow_intensity * 0.8))
         return max(5, int(self._glow_intensity * 0.6))
 
     # ── Frame CSS generation ─────────────────────────────────────────────
@@ -723,6 +750,9 @@ class AvatarWindow(QWidget):
                 self._debug_history[:] = self._debug_history[-200:]
         # Update tray icon state when assistant state changes
         state = kw.get("state")
+        if state:
+            self._assistant_state = state
+            self._apply_frame_style()
         if state and state in _STATE_COLORS and self._tray_state_ref:
             _update_tray_icon(self._tray_state_ref, state=state)
 

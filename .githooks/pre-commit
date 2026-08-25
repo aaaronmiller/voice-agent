@@ -1,0 +1,21 @@
+#!/bin/bash
+# Minimal pre-commit gate — just verifies the constitution exists.
+# The REAL gate is the constitution in AGENTS.md, loaded at session start.
+# This is a secondary safety net, not the primary enforcement.
+
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+CONSTITUTION="$ROOT/echo-node.livingdoc/constitution.md"
+AGENTS="$ROOT/AGENTS.md"
+
+if [ ! -f "$CONSTITUTION" ]; then
+    echo "❌ Constitution missing at echo-node.livingdoc/constitution.md"
+    echo "   Run: git commit --no-verify (requires human auth)"
+    exit 1
+fi
+PRINCIPLES=$(grep -c '^### Principle' "$CONSTITUTION")
+if [ "$PRINCIPLES" -ne 10 ]; then
+    echo "❌ Constitution has $PRINCIPLES principles, expected 10"
+    exit 1
+fi
+echo "✅ Constitution intact ($PRINCIPLES principles)"

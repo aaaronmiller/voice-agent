@@ -1,0 +1,18 @@
+{
+  "name": "echo-node-gateway",
+  "version": "1.0.0",
+  "description": "Echo-Node WebSocket gateway — relays audio and JSON between frontends and providers",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  }
+}
