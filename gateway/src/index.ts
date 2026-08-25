@@ -15,6 +15,7 @@ import { SessionManager } from "./session";
 import { healthRoutes } from "./api/health";
 import { statusRoutes } from "./api/status";
 import { configRoutes } from "./api/config";
+import { metricsRoutes } from "./api/metrics";
 import { createProvider } from "./providers/registry";
 import type { Session } from "./session";
 
@@ -29,6 +30,7 @@ const app = new Hono();
 app.route("/api/health", healthRoutes(sessions));
 app.route("/api/status", statusRoutes(sessions));
 app.route("/api/config", configRoutes(sessions));
+app.route("/api/metrics", metricsRoutes(sessions));
 
 // CORS for web frontend
 app.use("*", async (c, next) => {
