@@ -42,5 +42,6 @@
 - Replaced stale Hermes WebSocket integration notes with Hermes OpenAI-compatible API-server routing.
 
 ### Fixed
+- Fixed pre-commit hook resolving ROOT one directory too high — constitution check now targets the repo instead of `~/code`.
 - Fixed code block regex in speech formatter (was failing on ``` delimiters).
 - Fixed SmartRouter creating new CostTracker per call — session cost now accumulates correctly.
