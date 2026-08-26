@@ -4,7 +4,7 @@
 # This is a secondary safety net, not the primary enforcement.
 
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONSTITUTION="$ROOT/echo-node.livingdoc/constitution.md"
 AGENTS="$ROOT/AGENTS.md"
 
