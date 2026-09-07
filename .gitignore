@@ -45,3 +45,5 @@ v2/lk_google/.env
 v2/lk_google/.env
 
 *.bak
+
+*.lemonslice
