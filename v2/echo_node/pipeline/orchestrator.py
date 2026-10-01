@@ -17,13 +17,15 @@ from typing import Any
 
 from echo_node.backends import AgentBackend, REGISTRY, create_backend
 from echo_node.components.audio import AudioConfig, InterruptibleSpeaker, MicStream
-from echo_node.components.stt import FasterWhisperSTT, ParakeetSTT
+from echo_node.components.stt import create_stt
 from echo_node.components.vad import OpenWakeWordVad, Recorder
 from echo_node.components.wake import WakeDetector
 from echo_node.conversation_logger import ConversationLogger, TurnRecord
 from echo_node.pipeline.hotkey import KeyboardHotkey
 from echo_node.pipeline.integrations import HermesIntegration, PiIntegration
 from echo_node.pipeline.router import LLMRouter
+from echo_node.slots import SlotType
+from echo_node.slots.registry import get_registry
 
 
 # ── Assistant (orchestrator) ────────────────────────────────────────
@@ -37,13 +39,10 @@ class Assistant:
         self.vad = OpenWakeWordVad(config.get("vad", {}))
         self.recorder = Recorder(self.mic, self.vad, config.get("vad", {}))
 
-        # STT
+        # STT (provider resolved through the slot registry; unknown names
+        # fall back to parakeet — same as the old if/else dispatch)
         stt_cfg = config.get("stt", {})
-        stt_provider = stt_cfg.get("provider", "parakeet")
-        if stt_provider == "faster-whisper":
-            self.stt = FasterWhisperSTT(stt_cfg)
-        else:
-            self.stt = ParakeetSTT(stt_cfg)
+        self.stt = create_stt(stt_cfg)
 
         # Avatar
         try:
@@ -143,7 +142,9 @@ class Assistant:
     def _init_backend(self, config: dict[str, Any]) -> None:
         """Create or re-create the response-generation backend."""
         provider = str(config.get("backend", {}).get("provider", "hermes"))
-        if provider not in REGISTRY:
+        try:
+            get_registry().get(SlotType.AGENT_BACKEND, provider)
+        except KeyError:
             print(f"[backend] unknown provider {provider!r}, falling back to hermes", flush=True)
             provider = "hermes"
         self._backend_provider = provider
@@ -159,7 +160,12 @@ class Assistant:
         """Handle settings changes forwarded from the avatar window popup."""
         if cmd == "set_backend":
             provider = kw.get("provider", "")
-            if provider and provider != self._backend_provider and provider in REGISTRY:
+            try:
+                get_registry().get(SlotType.AGENT_BACKEND, provider)
+                known = True
+            except KeyError:
+                known = False
+            if provider and provider != self._backend_provider and known:
                 print(f"[settings] switching backend to {provider}", flush=True)
                 self._backend_provider = provider
                 self._init_backend(self.config)

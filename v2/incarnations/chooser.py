@@ -128,6 +128,51 @@ class Incarnation:
         return sd.default if sd else ""
 
 
+# ── Registry-driven dropdown options ────────────────────────────
+# incarnations.yaml keeps static `options:` lists as a fallback, but at
+# load time the provider dropdowns are regenerated from the slot
+# registry so the chooser only offers validated providers. Settings keys
+# here are "<section>.<key>" as they appear in incarnations.yaml.
+
+_SLOT_FOR_SETTING_KEY: dict[str, str] = {
+    "backend.provider": "agent_backend",
+    "tts.provider": "tts",
+    "stt.model": "stt",  # key is historical; the value is a provider name
+}
+
+
+def _registry_options_for(slot_name: str) -> list[str] | None:
+    """Validated provider names for a slot, or None if unavailable."""
+    try:
+        from echo_node.slots import SlotType
+        from echo_node.slots.registry import get_registry
+        names = [i.name for i in get_registry().working(SlotType(slot_name))]
+        return names or None
+    except Exception as exc:
+        log.warning(f"slot registry unavailable for {slot_name}: {exc}")
+        return None
+
+
+def _apply_registry_options(settings: dict[str, "SettingDef"]) -> None:
+    for key, slot_name in _SLOT_FOR_SETTING_KEY.items():
+        sd = settings.get(key)
+        if sd is None or sd.type != "dropdown":
+            continue
+        names = _registry_options_for(slot_name)
+        if names:
+            if sd.default not in names:
+                log.warning(
+                    f"incarnations.yaml default {key}={sd.default!r} not in "
+                    f"validated providers {names}; keeping default anyway")
+            # Remember the YAML fallback so save() doesn't persist the
+            # registry-derived list over it.
+            if not hasattr(sd, "_yaml_options"):
+                sd._yaml_options = sd.options
+            sd.options = names
+            log.info(f"dropdown {key}: registry options = {names}")
+        # else: keep the YAML fallback options
+
+
 class IncarnationManager:
     """Loads/saves config, manages subprocess lifecycle."""
 
@@ -173,6 +218,7 @@ class IncarnationManager:
             for k, v in saved.items():
                 if k in inc.settings:
                     inc.values[k] = inc.settings[k].coerce(v)
+            _apply_registry_options(inc.settings)
             self.incarnations.append(inc)
         log.info(f"Loaded {len(self.incarnations)} incarnations")
 
@@ -187,7 +233,13 @@ class IncarnationManager:
             for s_key, sd in inc.settings.items():
                 entry = {"label": sd.label, "type": sd.type,
                          "default": sd.default, "description": sd.description}
-                if sd.options: entry["options"] = sd.options
+                # Prefer the original YAML options over registry-derived ones
+                # so a save doesn't clobber the static fallback list.
+                yaml_options = getattr(sd, "_yaml_options", None)
+                if yaml_options:
+                    entry["options"] = yaml_options
+                elif sd.options:
+                    entry["options"] = sd.options
                 if sd.min is not None: entry["min"] = sd.min
                 if sd.max is not None: entry["max"] = sd.max
                 if sd.step is not None: entry["step"] = sd.step

@@ -18,6 +18,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from echo_node.components._common import rms_int16
+from echo_node.slots import Capability, VADProvider
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_module,
+    missing_result,
+    ok_result,
+)
 
 if TYPE_CHECKING:
     from echo_node.components.audio import MicStream
@@ -25,7 +32,7 @@ if TYPE_CHECKING:
 
 # ── VAD (OpenWakeWord, not Silero) ───────────────────────────────────
 
-class OpenWakeWordVad:
+class OpenWakeWordVad(VADProvider):
     """Speech/no-speech classifier.
 
     Combines OpenWakeWord's VAD score with an RMS energy floor: a frame
@@ -38,6 +45,27 @@ class OpenWakeWordVad:
         self.threshold = float(config.get("speech_threshold", 0.48))
         self.rms_floor = float(config.get("rms_floor", 350))
         self.vad = VAD()
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="openwakeword",
+            version="unknown",
+            languages=[],
+            streaming=True,   # per-frame scoring
+            gpu_required=False,
+            license="Apache-2.0",  # openwakeword package license
+            network=False,
+            notes=("OpenWakeWord VAD model + RMS energy floor; the class "
+                   "historically misnamed SileroVad"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("openwakeword")
+        if found:
+            return ok_result(f"openwakeword {ver} importable", {"version": ver})
+        return missing_result("openwakeword", {"module": "openwakeword"})
 
     def score(self, samples: np.ndarray) -> float:
         try:

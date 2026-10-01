@@ -27,7 +27,16 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from echo_node.components._common import pop_speakable_chunk, rms_int16, sentence_chunks
-from echo_node.components.tts import CosyVoice3TTS, DotsTTS, EspeakTTS, KokoroTTS
+from echo_node.components.barge_in import VadGatedBargeIn
+from echo_node.components.tts import EspeakTTS, create_tts
+from echo_node.slots import AudioIO, Capability
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_binary,
+    check_module,
+    missing_result,
+    ok_result,
+)
 
 if TYPE_CHECKING:
     from echo_node.components.vad import OpenWakeWordVad
@@ -48,11 +57,37 @@ class AudioConfig:
 
 # ── Mic stream ──────────────────────────────────────────────────────
 
-class MicStream:
+class MicStream(AudioIO):
+    """Mic capture; backend selected by AudioConfig.backend.
+
+    Registered in the slot registry under both "alsa" (arecord) and
+    "sounddevice", each with its own capabilities/validator.
+    """
     def __init__(self, config: AudioConfig):
         self.config = config
         self.process: subprocess.Popen[bytes] | None = None
         self.sd_stream: Any | None = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        # Generic fallback — the registry registers per-name descriptors.
+        return Capability(
+            name="micstream",
+            streaming=True,
+            license="unknown",
+            network=False,
+            notes="backend chosen by audio.backend: alsa (arecord) or sounddevice",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        arecord_ok, _ = check_binary("arecord")
+        sd_ok, _ = check_module("sounddevice")
+        if arecord_ok or sd_ok:
+            return ok_result("mic capture available",
+                             {"arecord": arecord_ok, "sounddevice": sd_ok})
+        return missing_result("arecord and sounddevice",
+                              {"arecord": False, "sounddevice": False})
 
     def open(self) -> None:
         if self.config.backend == "sounddevice":
@@ -120,6 +155,9 @@ class InterruptibleSpeaker:
         self.audio = audio
         self.vad = vad
         self.enabled = bool(config.get("enabled", True))
+        # Barge-in policy (slot provider): VAD-gated interruption with
+        # playback threshold boosting, debounce and hysteresis.
+        self.barge_in = VadGatedBargeIn(vad, config)
         # Debounce: sustained speech required before a barge-in triggers.
         self.min_speech_seconds = float(config.get("min_speech_seconds", 0.22))
         self.min_playback_age_seconds = float(config.get("min_playback_age_seconds", 0.45))
@@ -140,19 +178,7 @@ class InterruptibleSpeaker:
         # Debug data callback — called after each VAD reading during playback
         # with {"vad": 0.45, "rms": 600, "threshold": 0.40, ...}
         self.debug_callback: Callable[[dict], None] | None = None
-        try:
-            provider = tts_config.get("provider", "kokoro")
-            if provider == "dots":
-                self.tts = DotsTTS(tts_config)
-            elif provider == "cosyvoice3":
-                self.tts = CosyVoice3TTS(tts_config)
-            elif provider == "kokoro":
-                self.tts = KokoroTTS(tts_config)
-            else:
-                self.tts = EspeakTTS(tts_config)
-        except Exception as exc:
-            print(f"[tts] {tts_config.get('provider', 'kokoro')} unavailable, falling back to espeak-ng: {exc}", flush=True)
-            self.tts = EspeakTTS(tts_config)
+        self.tts = create_tts(tts_config)
 
     def unload(self) -> None:
         self.tts.unload()
@@ -240,63 +266,22 @@ class InterruptibleSpeaker:
             interrupted = self.speak(buffer.strip(), mic, turn_rec=turn_rec if first else None)
         return interrupted, full.strip()
 
+    # ── Barge-in policy delegation ────────────────────────────────
+    # The interruption algorithm lives in echo_node.components.barge_in
+    # (VadGatedBargeIn, a BARGE_IN slot provider). These wrappers keep the
+    # speaker's internal call sites unchanged.
+
     def _is_bargein_speech(self, samples: np.ndarray,
                            started: float,
                            grace_window: float,
                            original_threshold: float,
                            original_rms: float) -> bool:
-        """Enhanced speech detection for barge-in during playback.
-
-        During playback the assistant's own voice bleeds into the mic. A single
-        moderate reading (VAD *or* RMS) isn't enough to trigger — both must
-        exceed the boosted thresholds (AND gate). This prevents the speaker
-        bleed from falsely interrupting while still letting real human speech
-        through (real speech is high in both dimensions).
-
-        The first ``grace_window`` seconds use an even higher boost to survive
-        the initial TTS burst without falsely triggering.
-        """
-        age = time.monotonic() - started
-        if age < grace_window:
-            extra = 1.5
-        else:
-            extra = 1.0
-
-        boost = self.playback_threshold_boost * extra
-        boosted_threshold = min(0.99, original_threshold * boost)
-
-        rms_boost = self.playback_rms_boost * extra
-        boosted_rms = int(original_rms * rms_boost)
-
-        score = self.vad.score(samples)
-        rms = rms_int16(samples)
-
-        # AND gate: both VAD score AND RMS must exceed boosted thresholds.
-        # TTS speaker bleed typically scores moderate on one axis but not both.
-        # Real human speech scores high on both axes.
-        return score >= boosted_threshold and rms >= boosted_rms
+        return self.barge_in.is_bargein_speech(
+            samples, started, grace_window, original_threshold, original_rms)
 
     def _bargein_triggered(self, is_speech: bool, speech_started: float | None,
                            silence_started: float | None, now: float) -> tuple[bool, float | None, float | None]:
-        """Debounce + hysteresis state machine for one VAD reading.
-
-        Returns (triggered, speech_started, silence_started).
-        """
-        if is_speech:
-            if speech_started is None:
-                speech_started = now
-            silence_started = None
-            if now - speech_started >= self.min_speech_seconds:
-                return True, speech_started, silence_started
-        elif speech_started is not None:
-            # Hysteresis: only abandon the pending trigger after sustained
-            # silence, so one quiet frame can't cancel a real interruption.
-            if silence_started is None:
-                silence_started = now
-            elif now - silence_started >= self.bargein_end_grace_s:
-                speech_started = None
-                silence_started = None
-        return False, speech_started, silence_started
+        return self.barge_in.check(is_speech, speech_started, silence_started, now)
 
     def _play_wav(self, wav: Path, mic: MicStream | None) -> bool:
         if self.audio.backend == "sounddevice":

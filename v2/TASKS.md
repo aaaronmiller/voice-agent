@@ -49,6 +49,16 @@
 - [x] PyQt6 sidecar with stdin JSON protocol
 - [x] 9 visemes (A-H, X) per character
 
+### Phase A — Pluggable Slots + Provider Registry (ROADMAP.md)
+- [x] `echo_node/slots/` package: SlotType enum (8 slots), Capability dataclass, per-slot ABCs mirroring existing call patterns
+- [x] `echo_node/slots/registry.py`: explicit in-code registration, `working(slot)` dropdown source, `validate_all()` report; experimental opt-in via `ECHO_INCLUDE_EXPERIMENTAL`
+- [x] `echo_node/slots/validation.py`: graceful probes (imports, binaries, model files, short-timeout HTTP) — never downloads, never raises
+- [x] All existing components migrated as first-party providers with zero behavior change: faster-whisper/parakeet/onnx-asr (STT), kokoro/dots/cosyvoice3[exp]/espeak-ng (TTS), all 8 backends incl. gemini_live/openai_realtime[exp], openwakeword (VAD + wake), alsa/sounddevice (audio I/O), vad_gated (barge-in, extracted verbatim from InterruptibleSpeaker), rhubarb + musetalk[exp] (avatar)
+- [x] `validate_config()` and `InterruptibleSpeaker`/`Assistant` dispatch now resolve through the registry; unknown names keep historical fallbacks (STT→parakeet, TTS→espeak-ng, backend→hermes)
+- [x] Settings dropdowns read from registry: avatar popup STT/TTS combos, `BACKEND_OPTIONS`, incarnations chooser (`backend.provider`/`tts.provider`/`stt.model` regenerated at load, YAML kept as fallback)
+- [x] Conformance suite `echo_node/tests/test_phase_a.py`: 93 checks pass on bare VM (selection equivalence, ABC conformance, experimental exclusion, no config key renamed, graceful validation)
+- [ ] Real-hardware validation pass on Aaron's machine (GPU/audio/models) — the true gate for Phase A
+
 ---
 
 ## 📋 REMAINING TASKS

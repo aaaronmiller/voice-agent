@@ -10,6 +10,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+from echo_node.slots import Capability, TTSProvider
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_binary,
+    check_cuda,
+    check_module,
+    check_paths,
+    missing_result,
+    ok_result,
+)
+
 # v2/ directory (models/, gotit.wav, etc. live here). This module sits at
 # v2/echo_node/components/tts.py, so the project root is three levels up.
 _V2_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -17,13 +28,42 @@ _V2_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # ── TTS backends ────────────────────────────────────────────────────
 
-class KokoroTTS:
+class KokoroTTS(TTSProvider):
     def __init__(self, config: dict[str, Any]):
         self.model_path = (_V2_ROOT / str(config.get("model_path", "models/kokoro/kokoro-v1.0.onnx"))).resolve()
         self.voices_path = (_V2_ROOT / str(config.get("voices_path", "models/kokoro/voices-v1.0.bin"))).resolve()
         self.voice = str(config.get("voice", "af_heart"))
         self.speed = float(config.get("speed", 1.0))
         self._kokoro = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="kokoro",
+            version="v1.0",
+            languages=["en"],
+            streaming=False,  # batch: whole sentence per synthesize_to_wav()
+            vram_gb=None,
+            gpu_required=False,  # ONNX CPU
+            license="Apache-2.0",
+            network=False,
+            notes="default TTS: low-latency ONNX, 82M params",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("kokoro_onnx")
+        if not found:
+            return missing_result("kokoro_onnx", {"module": "kokoro_onnx"})
+        cfg = config or {}
+        model = str(_V2_ROOT / str(cfg.get("model_path", "models/kokoro/kokoro-v1.0.onnx")))
+        voices = str(_V2_ROOT / str(cfg.get("voices_path", "models/kokoro/voices-v1.0.bin")))
+        missing = check_paths(model, voices)
+        if missing:
+            return missing_result(f"kokoro model files: {missing[0]}",
+                                  {"missing": missing, "module_version": ver})
+        return ok_result(f"kokoro_onnx {ver} + model files present",
+                         {"version": ver, "model_path": model})
 
     def load(self) -> None:
         if self._kokoro is not None:
@@ -60,11 +100,37 @@ class KokoroTTS:
         return path
 
 
-class DotsTTS:
+class DotsTTS(TTSProvider):
     """GPU-accelerated TTS via dots.tts (2B AR model, MeanFlow distillation)."""
     def __init__(self, config: dict[str, Any]):
         from tts_dots import DotsTTS as _DotsTTS
         self._impl = _DotsTTS(config)
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="dots",
+            version="unknown",
+            languages=["en", "zh"],
+            streaming=True,   # exposes generate_stream()
+            vram_gb=4.0,      # 2B AR model; verify on target hardware
+            gpu_required=True,
+            license="unknown",
+            network=False,
+            notes="expressive tier; VRAM figure is an estimate — verify on 6GB GPUs",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("tts_dots")
+        if not found:
+            return missing_result("tts_dots",
+                                   {"module": "tts_dots (v2/tts_dots.py, needs v2 on sys.path)"})
+        cuda_ok, cuda_info = check_cuda()
+        details = {"module_version": ver, "cuda": cuda_info}
+        if not cuda_ok:
+            return ValidationResult(False, f"dots.tts needs CUDA: {cuda_info}", details)
+        return ok_result(f"tts_dots {ver} + CUDA ({cuda_info})", details)
 
     def load(self) -> None:
         self._impl.load()
@@ -89,11 +155,45 @@ class DotsTTS:
         return self._impl.sample_rate
 
 
-class CosyVoice3TTS:
+class CosyVoice3TTS(TTSProvider):
     """Higher-quality TTS via CosyVoice 3 (0.5B, GPU). Experimental — unverified on this hardware."""
     def __init__(self, config: dict[str, Any]):
         from tts_cosyvoice import CosyVoice3TTS as _CosyVoice3TTS
         self._impl = _CosyVoice3TTS(config)
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="cosyvoice3",
+            version="0.5B",
+            languages=["en", "zh"],  # 9 languages+dialects per module docstring
+            streaming=True,          # exposes generate_stream(); ~150ms TTFB
+            vram_gb=2.0,             # ~1-2GB fp16 per module docstring
+            gpu_required=True,       # "CPU works but is far too slow" — treat CUDA as required
+            license="Apache-2.0",
+            network=False,
+            notes="experimental; zero-shot voice cloning from a short reference clip",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("tts_cosyvoice")
+        if not found:
+            return missing_result("tts_cosyvoice",
+                                   {"module": "tts_cosyvoice (v2/tts_cosyvoice.py, needs v2 on sys.path)"})
+        cuda_ok, cuda_info = check_cuda()
+        cfg = config or {}
+        model_dir = str(_V2_ROOT / str(cfg.get("model_path", "models/cosyvoice3-0.5b")))
+        missing = check_paths(model_dir)
+        details = {"module_version": ver, "cuda": cuda_info, "model_dir": model_dir}
+        problems = []
+        if not cuda_ok:
+            problems.append(f"CUDA: {cuda_info}")
+        if missing:
+            problems.append(f"model dir missing: {model_dir}")
+        if problems:
+            return ValidationResult(False, "; ".join(problems), details)
+        return ok_result(f"tts_cosyvoice {ver} + CUDA + model dir present", details)
 
     def load(self) -> None:
         self._impl.load()
@@ -118,13 +218,33 @@ class CosyVoice3TTS:
         return self._impl.sample_rate
 
 
-class EspeakTTS:
+class EspeakTTS(TTSProvider):
     def __init__(self, config: dict[str, Any]):
         self.voice = str(config.get("espeak_voice", "en-us"))
         self.speed = str(config.get("espeak_speed", 165))
         self.pitch = str(config.get("espeak_pitch", 45))
         if shutil.which("espeak-ng") is None:
             raise RuntimeError("espeak-ng is not installed.")
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="espeak-ng",
+            version="unknown",
+            languages=["en"],  # other languages via the espeak_voice setting
+            streaming=False,
+            gpu_required=False,
+            license="GPL-3.0",
+            network=False,
+            notes="CPU fallback TTS; robotic but always available",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, path = check_binary("espeak-ng")
+        if found:
+            return ok_result("espeak-ng present", {"path": path})
+        return missing_result("espeak-ng", {"binary": "espeak-ng"})
 
     def synthesize_to_wav(self, text: str, path: Path) -> Path:
         subprocess.run(
@@ -138,3 +258,26 @@ class EspeakTTS:
 
     def warm(self) -> None:
         return
+
+
+# ── Registry-backed factory (historical fallback behavior preserved) ──
+
+def create_tts(tts_config: dict[str, Any]) -> TTSProvider:
+    """Instantiate the configured TTS provider.
+
+    Mirrors the old dispatch exactly: dots/cosyvoice3/kokoro by name,
+    anything else → espeak-ng; a provider that fails to construct falls
+    back to espeak-ng with the same log line as before.
+    """
+    from echo_node.slots import SlotType
+    from echo_node.slots.registry import get_registry
+    provider = str(tts_config.get("provider", "kokoro"))
+    try:
+        cls = get_registry().get(SlotType.TTS, provider)
+    except KeyError:
+        cls = EspeakTTS  # old `else:` branch — no warning, same as before
+    try:
+        return cls(tts_config)
+    except Exception as exc:
+        print(f"[tts] {provider} unavailable, falling back to espeak-ng: {exc}", flush=True)
+        return EspeakTTS(tts_config)

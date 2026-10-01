@@ -127,6 +127,62 @@ class MuseTalkRenderer:
         self._wait_for_generation()
         self.av.unload()
 
+    # ── Slot-registry descriptors (Phase A) ──────────────────────────
+    # Honesty note: this renderer does NOT implement the AvatarRenderer
+    # ABC (preload/play/stop) — it is a standalone prototype with its own
+    # generate()/get_frame() interface. validate() reports that gap, so
+    # the registry keeps it out of settings dropdowns until an adapter
+    # lands (Phase D work).
+
+    @classmethod
+    def capabilities(cls) -> "Capability":
+        from echo_node.slots import Capability
+        return Capability(
+            name="musetalk",
+            version="1.5 (prototype)",
+            languages=[],
+            streaming=True,
+            vram_gb=1.9,      # ~1.9GB per load() docstring
+            gpu_required=True,
+            license="unknown",
+            network=False,
+            notes=("prototype: standalone talking-head renderer; does NOT yet "
+                   "implement the AvatarRenderer preload/play/stop contract"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> "ValidationResult":
+        from echo_node.slots.validation import (
+            ValidationResult, check_cuda, check_module, check_paths,
+        )
+        details: dict[str, Any] = {}
+        problems = []
+        found, ver = check_module("musetalk")
+        details["musetalk"] = ver if found else "missing"
+        if not found:
+            problems.append("musetalk package not installed")
+        cuda_ok, cuda_info = check_cuda()
+        details["cuda"] = cuda_info
+        if not cuda_ok:
+            problems.append(f"CUDA unavailable: {cuda_info}")
+        manifest = str(REPO / "models" / "manifest.json")
+        missing = check_paths(manifest)
+        details["manifest"] = manifest
+        if missing:
+            problems.append(f"model manifest missing: {manifest}")
+        # Contract conformance: the registry's AvatarRenderer ABC needs
+        # preload/play/stop; this class has generate/get_frame instead.
+        missing_methods = [m for m in ("preload", "play", "stop")
+                           if not callable(getattr(cls, m, None))]
+        if missing_methods:
+            problems.append(
+                f"prototype does not implement AvatarRenderer contract "
+                f"(missing: {', '.join(missing_methods)})")
+        details["contract_missing"] = missing_methods
+        if problems:
+            return ValidationResult(False, "; ".join(problems), details)
+        return ValidationResult(True, "musetalk prototype fully present", details)
+
 
 # ── Simulated Avatar Window (for testing without full Qt) ──────────
 

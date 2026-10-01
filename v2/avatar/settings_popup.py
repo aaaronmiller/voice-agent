@@ -44,6 +44,22 @@ PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 PROFILES_DIR.mkdir(exist_ok=True)
 
 
+def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[str]:
+    """Dropdown options from the slot registry: validated providers only.
+
+    Falls back to the hardcoded list if the registry can't be consulted
+    (e.g. echo_node not importable in this context).
+    """
+    try:
+        from echo_node.slots import SlotType
+        from echo_node.slots.registry import get_registry
+        slot = SlotType(slot_name)
+        names = [i.name for i in get_registry().working(slot)]
+        return names or fallback
+    except Exception:
+        return fallback
+
+
 # ── Styling ──────────────────────────────────────────────────────
 
 TAB_STYLE = """
@@ -278,7 +294,7 @@ class SettingsPopup(QFrame):
         gb2 = QGroupBox("STT")
         f2 = QFormLayout(gb2); f2.setSpacing(3); f2.setContentsMargins(8, 16, 8, 8)
         self._stt_provider = QComboBox()
-        for p in ["faster-whisper", "parakeet"]:
+        for p in _registry_provider_names("stt", ["faster-whisper", "parakeet"]):
             self._stt_provider.addItem(p)
         self._stt_provider.currentTextChanged.connect(
             lambda v: self._emit("config", section="stt", key="provider", value=v))
@@ -296,7 +312,7 @@ class SettingsPopup(QFrame):
         gb3 = QGroupBox("TTS")
         f3 = QFormLayout(gb3); f3.setSpacing(3); f3.setContentsMargins(8, 16, 8, 8)
         self._tts_provider = QComboBox()
-        for p in ["kokoro", "dots", "espeak-ng"]:
+        for p in _registry_provider_names("tts", ["kokoro", "dots", "espeak-ng"]):
             self._tts_provider.addItem(p)
         self._tts_provider.currentTextChanged.connect(
             lambda v: self._emit("config", section="tts", key="provider", value=v))

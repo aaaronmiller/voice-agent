@@ -136,6 +136,9 @@ def _resolve_path(path_text: str) -> Path:
 
 def validate_config(config: dict[str, Any]) -> list[str]:
     """Validate config.yaml and return a list of fatal errors."""
+    from echo_node.slots import SlotType
+    from echo_node.slots.registry import get_registry
+    reg = get_registry()
     errors: list[str] = []
 
     # Required top-level sections
@@ -143,11 +146,12 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         if section not in config:
             errors.append(f"Missing required section: {section}")
 
-    # Audio
+    # Audio (backend names come from the AUDIO_IO slot registry)
     audio = config.get("audio", {})
     backend = audio.get("backend", "alsa")
-    if backend not in {"alsa", "sounddevice"}:
-        errors.append(f"audio.backend must be 'alsa' or 'sounddevice', got {backend!r}")
+    audio_names = set(reg.all_names(SlotType.AUDIO_IO))
+    if backend not in audio_names:
+        errors.append(f"audio.backend must be one of {sorted(audio_names)}, got {backend!r}")
     if int(audio.get("sample_rate", 0)) <= 0:
         errors.append("audio.sample_rate must be > 0")
     if int(audio.get("chunk_size", 0)) <= 0:
@@ -167,17 +171,19 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     if float(vad.get("silence_seconds", 0.85)) <= 0:
         errors.append("vad.silence_seconds must be > 0")
 
-    # STT
+    # STT (provider names come from the STT slot registry)
     stt = config.get("stt", {})
     provider = stt.get("provider", "parakeet")
-    if provider not in {"faster-whisper", "onnx-asr", "parakeet"}:
-        errors.append(f"stt.provider must be 'faster-whisper' or 'onnx-asr', got {provider!r}")
+    stt_names = set(reg.all_names(SlotType.STT))
+    if provider not in stt_names:
+        errors.append(f"stt.provider must be one of {sorted(stt_names)}, got {provider!r}")
 
-    # TTS
+    # TTS (provider names come from the TTS slot registry)
     tts = config.get("tts", {})
     tts_provider = tts.get("provider", "kokoro")
-    if tts_provider not in {"dots", "cosyvoice3", "kokoro", "espeak-ng"}:
-        errors.append(f"tts.provider must be 'dots', 'cosyvoice3', 'kokoro', or 'espeak-ng', got {tts_provider!r}")
+    tts_names = set(reg.all_names(SlotType.TTS))
+    if tts_provider not in tts_names:
+        errors.append(f"tts.provider must be one of {sorted(tts_names)}, got {tts_provider!r}")
     if tts_provider == "dots" and tts.get("model_path") and not _resolve_path(str(tts.get("model_path"))).exists():
         errors.append(f"dots.tts model path missing: {tts.get('model_path')}")
     if tts_provider == "kokoro":

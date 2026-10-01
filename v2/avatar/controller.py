@@ -23,6 +23,16 @@ from typing import Any, Callable
 
 import soundfile as sf
 
+from echo_node.slots import AvatarRenderer, Capability
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_binary,
+    check_module,
+    check_paths,
+    missing_result,
+    ok_result,
+)
+
 _BASE = Path(__file__).resolve().parent
 _FRAMES_ROOT = _BASE / "frames"
 _VENDOR_RHUBARB = _BASE.parent / "vendor" / "rhubarb" / "rhubarb"
@@ -64,7 +74,7 @@ class NullAvatar:
         pass
 
 
-class AvatarController:
+class AvatarController(AvatarRenderer):
     """Live avatar controller. Spawns the PyQt6 sidecar and ships viseme cues
     derived from each TTS WAV.
 
@@ -224,6 +234,36 @@ class AvatarController:
 
     def stop(self) -> None:
         self._send({"cmd": "stop"})
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="rhubarb",
+            version="unknown",
+            languages=[],
+            streaming=False,  # preload() runs rhubarb synchronously per chunk
+            gpu_required=False,
+            license="MIT",     # rhubarb-lip-sync binary; the Qt sidecar is PyQt6 (GPL)
+            network=False,
+            notes=("PyQt6 floating window + Rhubarb Lip Sync visemes; "
+                   "needs the rhubarb binary (v2/vendor/rhubarb/rhubarb or PATH)"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        # rhubarb binary: configured path, vendored copy, or PATH.
+        cfg = config or {}
+        rhubarb = _resolve_rhubarb(cfg.get("rhubarb_path"))
+        found_qt, qt_ver = check_module("PyQt6")
+        details: dict[str, Any] = {"rhubarb": rhubarb, "pyqt6": qt_ver if found_qt else "missing"}
+        problems = []
+        if rhubarb is None:
+            problems.append("rhubarb binary not found (rhubarb_path, v2/vendor/rhubarb/rhubarb, PATH)")
+        if not found_qt:
+            problems.append("PyQt6 not installed")
+        if problems:
+            return ValidationResult(False, "; ".join(problems), details)
+        return ok_result(f"rhubarb at {rhubarb}, PyQt6 {qt_ver}", details)
 
     # -- styling commands ----------------------------------------------------
 

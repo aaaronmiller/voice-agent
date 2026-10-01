@@ -94,6 +94,19 @@ VRAM on the 4050, Nemotron-3.5-ASR license, sherpa-onnx KWS model license.
   the registry; migrate every existing component as a first-party provider
   (no behavior change). Settings dropdowns for STT/TTS/backend read from
   `registry.working(slot)`.
+  - Status (2026-10-01): **built, awaiting real-hardware validation.**
+    `echo_node/slots/` (SlotType, Capability, 8 ABCs), `registry.py`
+    (explicit registration, `working()`, `validate_all()`),
+    `validation.py` (graceful probes). All existing components migrated as
+    providers under their exact config names; dispatch in
+    `InterruptibleSpeaker`/`Assistant`/`validate_config` routes through the
+    registry with historical fallbacks preserved. Dropdowns wired:
+    avatar popup (STT/TTS/backend), incarnations chooser (regenerated at
+    load, YAML fallback kept). Conformance suite
+    `echo_node/tests/test_phase_a.py` — 93 checks pass on a bare VM.
+    Validators honestly report missing models/binaries/keys on machines
+    without them. Not yet run on GPU/audio hardware — that pass is the
+    real gate before Phase B.
 - **Phase B — SubprocessAdapter.** JSON-RPC-over-stdio adapter; 2–3 external
   adapters as proof (e.g. a whisper.cpp STT, a Piper-style TTS). Validates the
   "any program can take a slot's place" claim end to end.

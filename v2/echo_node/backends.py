@@ -35,6 +35,38 @@ from typing import Any
 
 import requests
 
+from echo_node.slots import Capability
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_binary,
+    check_env,
+    check_http,
+    check_paths,
+    missing_result,
+    ok_result,
+)
+
+_V2_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _env_or_missing(*names: str) -> ValidationResult | None:
+    """Return a missing-API-key result, or None if all *names* are set."""
+    missing = check_env(*names)
+    if missing:
+        return missing_result(f"API key ({' or '.join(missing)})",
+                              {"env": missing})
+    return None
+
+
+def _cli_or_missing(binary: str, *env_names: str) -> ValidationResult | None:
+    """Check CLI binary + env keys; return failure result or None."""
+    found, path = check_binary(binary)
+    if not found:
+        return missing_result(binary, {"binary": path})
+    if env_names:
+        return _env_or_missing(*env_names)
+    return None
+
 
 # ── Backend registry ────────────────────────────────────────────────
 
@@ -101,6 +133,30 @@ class HermesBackend(AgentBackend):
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config=config)
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="hermes",
+            languages=["en"],
+            streaming=True,   # chat_stream() implements SSE streaming
+            gpu_required=False,  # server-side concern, not the client's
+            license="unknown",
+            network=False,       # localhost / LAN server
+            notes="local Hermes agent server (default http://127.0.0.1:8642)",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        cfg = config or {}
+        base = str(cfg.get("base_url", "http://127.0.0.1:8642/v1")).rstrip("/")
+        health = (base[:-3] if base.endswith("/v1") else base).rstrip("/") + "/health"
+        ok, info = check_http(health, timeout=1.5)
+        if ok:
+            return ok_result(f"Hermes server reachable ({info})",
+                             {"health_url": health})
+        return ValidationResult(False, f"Hermes server not reachable: {info}",
+                                {"health_url": health})
 
     def is_available(self) -> bool:
         try:
@@ -193,6 +249,25 @@ class PiBackend(AgentBackend):
         self.command = list(config.get("command", ["pi", "-p"]))
         self.timeout = int(config.get("timeout_seconds", 120))
 
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="pi",
+            languages=["en"],
+            streaming=False,  # subprocess.run captures full output
+            gpu_required=False,
+            license="unknown",
+            network=False,
+            notes="pi CLI subprocess (local tool-calling agent)",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        bad = _cli_or_missing("pi")
+        if bad:
+            return bad
+        return ok_result("pi CLI present", {"binary": check_binary("pi")[1]})
+
     def is_available(self) -> bool:
         return shutil.which(self.command[0]) is not None
 
@@ -224,6 +299,26 @@ class ClaudeCodeBackend(AgentBackend):
         self.command = list(config.get("command", ["claude", "-p"]))
         self.timeout = int(config.get("timeout_seconds", 120))
         self._check = None  # cached is_available result
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="claude",
+            languages=["en"],
+            streaming=False,  # subprocess.run captures full output
+            gpu_required=False,
+            license="unknown",
+            network=True,       # calls the Anthropic API
+            notes="claude CLI headless (-p); needs ANTHROPIC_API_KEY",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        bad = _cli_or_missing("claude", "ANTHROPIC_API_KEY")
+        if bad:
+            return bad
+        return ok_result("claude CLI + ANTHROPIC_API_KEY present",
+                         {"binary": check_binary("claude")[1]})
 
     def is_available(self) -> bool:
         if self._check is not None:
@@ -266,6 +361,26 @@ class CodexBackend(AgentBackend):
         self.command = list(config.get("command", ["codex"]))
         self.timeout = int(config.get("timeout_seconds", 120))
         self._check = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="codex",
+            languages=["en"],
+            streaming=False,  # subprocess.run captures full output
+            gpu_required=False,
+            license="unknown",
+            network=True,       # calls the OpenAI API
+            notes="codex CLI; needs OPENAI_API_KEY",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        bad = _cli_or_missing("codex", "OPENAI_API_KEY")
+        if bad:
+            return bad
+        return ok_result("codex CLI + OPENAI_API_KEY present",
+                         {"binary": check_binary("codex")[1]})
 
     def is_available(self) -> bool:
         if self._check is not None:
@@ -315,6 +430,28 @@ class OpenAIBackend(AgentBackend):
         self.timeout = float(config.get("timeout_seconds", 60))
         self.max_history = int(config.get("max_history_turns", 0))
         self._history: list[dict[str, str]] = []
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="openai",
+            languages=["en"],
+            streaming=True,   # chat_stream() implements SSE streaming
+            gpu_required=False,
+            license="unknown",
+            network=True,
+            notes="direct OpenAI Chat Completions API; needs OPENAI_API_KEY",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        cfg = config or {}
+        if str(cfg.get("api_key", "")).strip():
+            return ok_result("api_key present in config", {})
+        bad = _env_or_missing("OPENAI_API_KEY")
+        if bad:
+            return bad
+        return ok_result("OPENAI_API_KEY present", {})
 
     def is_available(self) -> bool:
         return bool(self.api_key)
@@ -432,6 +569,28 @@ class OpenRouterBackend(AgentBackend):
         self.max_history = int(config.get("max_history_turns", 0))
         self._history: list[dict[str, str]] = []
 
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="openrouter",
+            languages=["en"],
+            streaming=True,   # chat_stream() implements SSE streaming
+            gpu_required=False,
+            license="unknown",
+            network=True,
+            notes="OpenRouter Chat Completions API; needs OPENROUTER_API_KEY",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        cfg = config or {}
+        if str(cfg.get("api_key", "")).strip():
+            return ok_result("api_key present in config", {})
+        bad = _env_or_missing("OPENROUTER_API_KEY")
+        if bad:
+            return bad
+        return ok_result("OPENROUTER_API_KEY present", {})
+
     def is_available(self) -> bool:
         return bool(self.api_key)
 
@@ -548,6 +707,31 @@ class GeminiLiveBackend(AgentBackend):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config=config)
 
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="gemini_live",
+            version="gemini-3.1-flash-live-preview (STALE — re-verify)",
+            languages=["en"],
+            streaming=True,   # voice-native WebSocket
+            gpu_required=False,
+            license="unknown",
+            network=True,
+            notes=("experimental: voice-native provider, NOT a text backend; "
+                   "standalone CLI at v2/providers/gemini_live.py"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        bad = _env_or_missing("GEMINI_API_KEY")
+        if bad:
+            return bad
+        cli = str(_V2_ROOT / "providers" / "gemini_live.py")
+        missing = check_paths(cli)
+        if missing:
+            return missing_result(f"CLI script: {cli}", {"cli": cli})
+        return ok_result("GEMINI_API_KEY + CLI script present", {"cli": cli})
+
     def is_available(self) -> bool:
         return bool(self.config.get("api_key") or os.environ.get("GEMINI_API_KEY"))
 
@@ -571,6 +755,31 @@ class OpenAIRealtimeBackend(AgentBackend):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config=config)
 
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="openai_realtime",
+            version="gpt-4o-realtime-preview-2024-12-17 (STALE — re-verify)",
+            languages=["en"],
+            streaming=True,   # voice-native WebSocket
+            gpu_required=False,
+            license="unknown",
+            network=True,
+            notes=("experimental: voice-native provider, NOT a text backend; "
+                   "standalone CLI at v2/providers/openai_realtime.py"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        bad = _env_or_missing("OPENAI_API_KEY")
+        if bad:
+            return bad
+        cli = str(_V2_ROOT / "providers" / "openai_realtime.py")
+        missing = check_paths(cli)
+        if missing:
+            return missing_result(f"CLI script: {cli}", {"cli": cli})
+        return ok_result("OPENAI_API_KEY + CLI script present", {"cli": cli})
+
     def is_available(self) -> bool:
         return bool(self.config.get("api_key") or os.environ.get("OPENAI_API_KEY"))
 
@@ -592,6 +801,10 @@ REGISTRY: dict[str, type[AgentBackend]] = {
     "gemini_live": GeminiLiveBackend,
     "openai_realtime": OpenAIRealtimeBackend,
 }
+
+# Backends that stay out of settings dropdowns unless experimental
+# providers are explicitly opted in (ECHO_INCLUDE_EXPERIMENTAL=1).
+EXPERIMENTAL_BACKENDS: set[str] = {"gemini_live", "openai_realtime"}
 
 # Labels for the settings popup dropdown (provider_key → display name)
 BACKEND_LABELS: dict[str, str] = {
@@ -629,12 +842,36 @@ def check_backend_availability(provider: str, config: dict[str, Any]) -> bool:
 
 # ── Backend enumeration for settings popup ──────────────────────────
 
-# Ordered list of (provider_key, label, icon_glyph) for the settings popup
-BACKEND_OPTIONS: list[tuple[str, str, str]] = [
-    ("hermes", "Hermes Agent", ""),
-    ("pi", "Pi Agent", ""),
-    ("claude", "Claude Code", ""),
-    ("codex", "Codex CLI", ""),
-    ("openai", "OpenAI API", ""),
-    ("openrouter", "OpenRouter API", ""),
-]
+# Glyph icons for the avatar settings popup (kept here so the popup code
+# doesn't need its own icon table).
+_BACKEND_GLYPHS: dict[str, str] = {
+    "hermes": "",
+    "pi": "",
+    "claude": "",
+    "codex": "",
+    "openai": "",
+    "openrouter": "",
+}
+
+
+def _build_backend_options() -> list[tuple[str, str, str]]:
+    """Dropdown options for the settings popup, driven by the slot registry.
+
+    Only providers that pass validation appear (experimental ones are
+    excluded unless ECHO_INCLUDE_EXPERIMENTAL=1). Falls back to every
+    registered non-experimental backend if validation finds nothing, so
+    the popup never renders an empty dropdown.
+    """
+    from echo_node.slots import SlotType
+    from echo_node.slots.registry import get_registry
+    working = get_registry().working(SlotType.AGENT_BACKEND)
+    if not working:
+        working = [i for i in get_registry().all_providers(SlotType.AGENT_BACKEND)
+                   if not i.experimental]
+    return [(i.name, i.provider_cls.name, _BACKEND_GLYPHS.get(i.name, ""))
+            for i in working]
+
+
+# Ordered list of (provider_key, label, icon_glyph) for the settings popup.
+# Registry-driven: validated, non-experimental backends only.
+BACKEND_OPTIONS: list[tuple[str, str, str]] = _build_backend_options()

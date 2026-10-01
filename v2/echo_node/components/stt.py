@@ -6,16 +6,45 @@ import time
 from pathlib import Path
 from typing import Any
 
+from echo_node.slots import Capability, STTProvider
+from echo_node.slots.validation import (
+    ValidationResult,
+    check_module,
+    missing_result,
+    ok_result,
+)
+
 
 # ── STT backends ────────────────────────────────────────────────────
 
-class FasterWhisperSTT:
+class FasterWhisperSTT(STTProvider):
     """STT via faster-whisper (CTranslate2, CPU int8)."""
     def __init__(self, config: dict[str, Any]):
         self.model_size = str(config.get("model", "tiny"))
         self.device = str(config.get("device", "cpu"))
         self.compute_type = str(config.get("compute_type", "int8"))
         self._model = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="faster-whisper",
+            version="unknown",
+            languages=["en"],  # transcribe() pins language="en"
+            streaming=False,    # batch: whole WAV per transcribe() call
+            vram_gb=None,
+            gpu_required=False,  # CTranslate2 CPU int8
+            license="MIT",
+            network=False,
+            notes="model downloads from Hugging Face on first load",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("faster_whisper")
+        if found:
+            return ok_result(f"faster-whisper {ver} importable", {"version": ver})
+        return missing_result("faster-whisper", {"module": "faster_whisper"})
 
     def load(self) -> None:
         if self._model is not None:
@@ -50,12 +79,35 @@ PARAKEET_V3_MODEL = "istupakov/parakeet-tdt-0.6b-v3-onnx"
 PARAKEET_V2_MODEL = "nemo-parakeet-tdt-0.6b-v2"
 
 
-class ParakeetSTT:
+class ParakeetSTT(STTProvider):
     def __init__(self, config: dict[str, Any]):
         self.model_name = str(config.get("model_name", PARAKEET_V3_MODEL))
         self.quantization = str(config.get("quantization", "int8"))
         self.providers = [str(p) for p in config.get("providers", [])]
         self.model = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="parakeet",
+            version="0.6B (TDT v3)",
+            languages=["en"],
+            streaming=True,   # TDT is a streaming-capable architecture
+            vram_gb=0.7,      # INT8 ONNX bundle ~640MB
+            gpu_required=False,  # CPUExecutionProvider default
+            license="unknown",   # v3 ONNX bundle license unverified; NVIDIA's
+                                 # v2 weights are non-commercial (CC-BY-NC-4.0)
+            network=True,        # onnx-asr auto-downloads the HF model id
+            notes=("default STT; auto-falls back to nemo-parakeet-tdt-0.6b-v2 "
+                   "if the v3 bundle fails to load"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("onnx_asr")
+        if found:
+            return ok_result(f"onnx-asr {ver} importable", {"version": ver})
+        return missing_result("onnx-asr", {"module": "onnx_asr"})
 
     def load(self) -> None:
         if self.model is not None:
@@ -92,3 +144,22 @@ class ParakeetSTT:
         text = result[0] if isinstance(result, list) else result
         print(f"[timing] stt={time.perf_counter() - started:.2f}s", flush=True)
         return str(text).strip()
+
+
+# ── Registry-backed factory (historical fallback behavior preserved) ──
+
+def create_stt(stt_config: dict[str, Any]) -> STTProvider:
+    """Instantiate the configured STT provider.
+
+    Unknown provider names fall back to ParakeetSTT — exactly the old
+    ``if faster-whisper … else Parakeet`` dispatch in the orchestrator.
+    """
+    from echo_node.slots import SlotType
+    from echo_node.slots.registry import get_registry
+    provider = str(stt_config.get("provider", "parakeet"))
+    try:
+        cls = get_registry().get(SlotType.STT, provider)
+    except KeyError:
+        print(f"[stt] unknown provider {provider!r}, falling back to parakeet", flush=True)
+        cls = ParakeetSTT
+    return cls(stt_config)
