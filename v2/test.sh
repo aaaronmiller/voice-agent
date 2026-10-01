@@ -92,17 +92,39 @@ print("All speech format tests passed")
 PY
 
 check "Agent profiles load" .venv/bin/python - <<'PY'
+import os
 from echo_node.agent_profiles import get_all_agents, SmartRouter
+
+# Exercise the CLI-gateway placeholder path deterministically
+os.environ.pop("ECHO_CLI_GATEWAY", None)
+
 agents = get_all_agents()
 router = SmartRouter(agents)
 assert "fast" in agents
 assert "hermes" in agents
-route = router.classify("search the web for weather")
-assert route == "hermes", f"Expected hermes, got {route}"
-route2 = router.classify("what time is it")
-# SmartRouter now routes everything to hermes by default
-assert route2 == "hermes", f"Expected hermes, got {route2}"
-print(f"OK: {len(agents)} agents loaded")
+
+# Representative routing cases (keyword-based, deterministic)
+cases = {
+    "search the web for weather": "hermes",      # tool/action keywords
+    "send an email to mom": "hermes",            # tool/action keywords
+    "what time is it": "fast",                  # quick factual lookup
+    "who is the president": "fast",              # quick factual lookup
+    "think through the pros and cons of moving": "nemotron",  # reasoning-heavy
+    "prove the quadratic formula": "nemotron",   # reasoning-heavy
+    "read this aloud in a pirate voice": "gpt-audio-mini",    # audio-native
+    "say hello with the best quality voice": "gpt-audio",     # top-quality audio
+    "tell me a story about a robot": "hermes",   # default fallback
+}
+for text, expected in cases.items():
+    route = router.classify(text)
+    assert route == expected, f"classify({text!r}) = {route!r}, expected {expected!r}"
+
+# Unconfigured CLI agents must report cleanly, never raise FileNotFoundError
+res = agents["claude"].respond("hi")
+assert not res.success, "expected failure without ECHO_CLI_GATEWAY"
+assert "not configured" in res.text.lower(), f"unexpected message: {res.text}"
+
+print(f"OK: {len(agents)} agents loaded, {len(cases)} routing cases passed")
 PY
 
 check "Keyboard hotkey importable" .venv/bin/python -c "from assistant_v2 import KeyboardHotkey; print('ok')"

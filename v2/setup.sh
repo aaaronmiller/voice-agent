@@ -7,7 +7,7 @@
 # What it does:
 #   1. Detects platform (linux / darwin / wsl2)
 #   2. Installs system dependencies (apt/brew)
-#   3. Creates Python venv + installs packages
+#   3. Creates Python venv + installs packages (incl. optional dots.tts on GPU)
 #   4. Downloads Kokoro TTS models
 #   5. Downloads Rhubarb lip-sync binary (platform-specific)
 #   6. Downloads OpenWakeWord wake word models
@@ -166,15 +166,41 @@ $VENV_PYTHON -m pip install \
   soundfile>=0.12 \
   sounddevice>=0.5 \
   pynput>=1.7 \
-  pyyaml>=6.0 \
   -q
 
 # faster-whisper (CT-Translate, may need extra deps on macOS)
 $VENV_PYTHON -m pip install faster-whisper -q 2>/dev/null || {
   echo "  WARNING: faster-whisper install failed (common on Apple Silicon)."
-  echo "  Falling back to onnx-asr STT (already installed)."
-  echo "  The assistant will use the 'parakeet' STT provider instead."
+  echo "  It is optional: install it later with '.venv/bin/pip install faster-whisper',"
+  echo "  or set 'stt.provider: parakeet' in config.yaml to use the onnx-asr STT instead."
 }
+
+# dots.tts (optional, GPU only)
+# Needed only when tts.provider=dots in config.yaml. Installs torch (CUDA
+# build) and the dots.tts package from PyPI (imported as dots_tts).
+# Skipped automatically when no NVIDIA GPU is detected; override with
+# ECHO_INSTALL_DOTS=1 (force install) or ECHO_INSTALL_DOTS=0 (skip).
+INSTALL_DOTS="${ECHO_INSTALL_DOTS:-auto}"
+if [[ "$INSTALL_DOTS" == "auto" ]]; then
+  if command -v nvidia-smi &>/dev/null && nvidia-smi -L &>/dev/null; then
+    INSTALL_DOTS=1
+  else
+    INSTALL_DOTS=0
+  fi
+fi
+if [[ "$INSTALL_DOTS" == "1" ]]; then
+  echo "  Installing torch (CUDA) + dots.tts for GPU TTS..."
+  $VENV_PYTHON -m pip install torch --index-url https://download.pytorch.org/whl/cu121 -q || {
+    echo "  WARNING: torch install failed; tts.provider=dots will not work."
+  }
+  $VENV_PYTHON -m pip install "dots.tts" -q || {
+    echo "  WARNING: dots.tts install failed; tts.provider=dots will not work."
+  }
+  echo "  NOTE: download the model weights before first use:"
+  echo "        huggingface-cli download rednote-hilab/dots.tts-mf --local-dir models/dots-tts-mf"
+else
+  echo "  Skipping dots.tts (no NVIDIA GPU detected; set ECHO_INSTALL_DOTS=1 to force)"
+fi
 
 # Avatar (PyQt6 — optional, skips if fails)
 $VENV_PYTHON -m pip install PyQt6 Pillow -q 2>/dev/null || {
@@ -186,6 +212,9 @@ echo "  ✓ Python packages installed"
 echo
 
 # ── Download Kokoro TTS models ──────────────────────────────────────
+# NOTE: upstream does not publish checksums for these release artifacts.
+# If checksums become available, verify downloads, e.g.:
+#   echo "<sha256>  models/kokoro/kokoro-v1.0.onnx" | sha256sum -c -
 
 echo "── Kokoro TTS models ──"
 mkdir -p models/kokoro
@@ -210,6 +239,8 @@ download \
 echo
 
 # ── Download Rhubarb lip-sync binary ────────────────────────────────
+# NOTE: upstream does not publish checksums for these release zips.
+# If checksums become available, verify $local_zip before extracting.
 
 echo "── Rhubarb lip-sync ──"
 mkdir -p vendor/rhubarb
@@ -233,7 +264,7 @@ RHUBARB_URL=""
 case "$PLATFORM" in
   linux|wsl2)
     RHUBARB_URL="https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v${RHUBARB_VERSION}/Rhubarb-Lip-Sync-${RHUBARB_VERSION}-Linux.zip"
-    RHUBARB_EXTRACTED="Rhubard-Lip-Sync-${RHUBARB_VERSION}-Linux"
+    RHUBARB_EXTRACTED="Rhubarb-Lip-Sync-${RHUBARB_VERSION}-Linux"
     ;;
   darwin)
     RHUBARB_URL="https://github.com/DanielSWolf/rhubarb-lip-sync/releases/download/v${RHUBARB_VERSION}/Rhubarb-Lip-Sync-${RHUBARB_VERSION}-macOS.zip"

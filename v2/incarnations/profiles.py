@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import signal
 import subprocess
 import time
@@ -213,7 +214,9 @@ class ProfileManager:
         cmd = cmd.replace("${CWD}", cwd_abs)
         for key, val in p.settings.items():
             env_key = key.upper().replace(".", "_")
-            cmd = cmd.replace(f"${{{env_key}}}", str(val))
+            # shlex.quote so a value containing $(...), spaces, quotes, etc.
+            # cannot break out of the shell command template.
+            cmd = cmd.replace(f"${{{env_key}}}", shlex.quote(str(val)))
 
         # ── Launch ──
         log_path = _REPO_DIR / tmpl.log_file

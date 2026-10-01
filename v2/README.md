@@ -8,10 +8,10 @@ hardware.
 - Local audio input: `arecord -D default`
 - Local audio output: `aplay -D default`
 - Wake word: OpenWakeWord with local ONNX models
-- VAD/silence/barge-in: Silero VAD from OpenWakeWord resources
-- STT: Parakeet TDT 0.6B v2 through `onnx-asr`
-- TTS: Kokoro ONNX, with espeak-ng fallback
-- Backend: Ollama or any OpenAI-compatible `/v1/chat/completions` endpoint
+- VAD/silence/barge-in: OpenWakeWord VAD (threshold boosted during TTS playback, barge-in hysteresis)
+- STT: Parakeet TDT 0.6B v3 through `onnx-asr` (v2 auto-fallback; faster-whisper optional)
+- TTS: Kokoro ONNX (default), dots.tts (GPU), CosyVoice 3 (GPU, experimental), espeak-ng fallback
+- Backend: Hermes agent server (default) or any OpenAI-compatible `/v1/chat/completions` endpoint
 
 ## Setup
 

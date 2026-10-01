@@ -8,10 +8,10 @@ incarnations:
   # 0: Original v2
   # ═══════════════════════════════════════════════════════════════
   - name: "🎙️ Original v2"
-    description: "Whisper STT → Hermes Agent → Kokoro TTS + Rhubarb lip-sync"
+    description: "Faster-Whisper STT → Hermes Agent → Kokoro TTS + Rhubarb lip-sync"
     command:
       linux: "bash -c 'cd ${CWD} && source env.sh 2>/dev/null; source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py'"
-      macos: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py --macos'"
+      macos: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py'"
       wsl: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python assistant_v2.py --config config.wsl.yaml'"
     cwd: "."
     log_file: "logs/assistant.log"
@@ -21,7 +21,7 @@ incarnations:
       backend.provider:
         label: "Backend Provider"
         type: dropdown
-        options: ["hermes", "pi", "claude-code", "codex", "openai", "openrouter"]
+        options: ["hermes", "pi", "claude", "codex", "openai", "openrouter"]
         default: "hermes"
         description: "Which AI backend to use for responses"
       backend.api_key:
@@ -44,7 +44,7 @@ incarnations:
       tts.provider:
         label: "TTS Engine"
         type: dropdown
-        options: ["kokoro", "dots", "espeak"]
+        options: ["kokoro", "dots", "espeak-ng"]
         default: "kokoro"
         description: "Text-to-speech engine"
       tts.speed:
@@ -280,7 +280,7 @@ incarnations:
   - name: "\U0001f3ad MuseTalk Local"
     description: "v2 assistant + real-time MuseTalk lip-sync on RTX 4050 (local, no API)"
     command:
-      linux: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python avatar_video/musetalk_assistant.py --photo ${PHOTO_PATH}'"
+      linux: "bash -c 'cd ${CWD} && source .venv/bin/activate 2>/dev/null; exec python avatar_video/musetalk_assistant.py --photo ${AVATAR_PHOTO_PATH}'"
     cwd: "."
     log_file: "logs/musetalk.log"
 

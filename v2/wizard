@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
+# Echo-Node setup wizard.
+#
+# Shim for tools/deploy_wizard.py — the interactive first-run configuration
+# wizard referenced as ./wizard in the README. Run from the v2 directory:
+#
+#   cd v2 && ./wizard
+#
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT"
 
-if [[ -x .venv/bin/python ]]; then
-  exec .venv/bin/python tools/deploy_wizard.py "$@"
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY="python3"
 fi
 
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 tools/deploy_wizard.py "$@"
-fi
-
-echo "ERROR: python3 not found. Run ./setup.sh first." >&2
-exit 1
+exec "$PY" "$ROOT/tools/deploy_wizard.py" "$@"

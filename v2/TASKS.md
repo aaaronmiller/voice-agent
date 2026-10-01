@@ -3,10 +3,11 @@
 ## ✅ COMPLETED (Live)
 
 ### Core Pipeline
-- [x] Faster-whisper STT (tiny model, CPU, ~0.35s) — replaced Parakeet
+- [x] Phase-4 modularization completed: `assistant_v2.py` entry point imports from `echo_node/components/` + `echo_node/pipeline/` (16 classes extracted from the old monolith; `validate_config` enforced, `_GOTIT_WAV` defined, dead `@dataclass` decorator removed)
+- [x] Parakeet TDT v3 0.6B STT (onnx-asr, INT8; v2 auto-fallback) — faster-whisper still available
 - [x] dots.tts TTS (GPU, SOTA quality, ~2s gen)
 - [x] Kokoro TTS fallback (CPU, faster for short responses)
-- [x] Silero VAD + barge-in support
+- [x] OpenWakeWord VAD + barge-in support (was mislabeled "Silero VAD"; class renamed, alias kept)
 - [x] OpenWakeWord detection (hey rhasspy)
 - [x] Silence timeout reduced to 0.5s
 - [x] Speech formatting — tables summarized, code described, 4-sentence cap
@@ -92,7 +93,7 @@
 ## Architecture
 
 ```
-wake word (OpenWakeWord) → VAD (Silero) → STT (faster-whisper)
+wake word (OpenWakeWord) → VAD (OpenWakeWord) → STT (Parakeet v3)
        ↓
   KeyboardHotkey (Enter/Escape toggle)
        ↓
@@ -107,7 +108,7 @@ wake word (OpenWakeWord) → VAD (Silero) → STT (faster-whisper)
        ↓
   SpeechFormatter (tables→summary, code→desc, 4-sentence cap)
        ↓
-  InterruptibleSpeaker → dots.tts (GPU) / Kokoro (CPU) / espeak-ng
+  InterruptibleSpeaker → dots.tts (GPU) / CosyVoice 3 (GPU, experimental) / Kokoro (CPU) / espeak-ng
        ↓
   Avatar (async Rhubarb lip-sync → PyQt6 sidecar)
 ```

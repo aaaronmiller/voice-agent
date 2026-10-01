@@ -1,34 +1,18 @@
 #!/usr/bin/env python3
 """Echo-Node v2 — local voice assistant with smart routing.
 
-Stack: OpenWakeWord → Silero VAD → faster-whisper/dots.tts → SmartRouter → agents
+Stack: OpenWakeWord (wake-word + VAD) → Parakeet/faster-whisper → SmartRouter → agents
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
-import json
-import math
 import os
-import queue
-import re
 import shutil
-import signal
-import subprocess
 import sys
-import tempfile
-import threading
-import time
-import wave
-from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable, Iterable
 from typing import Any
 
-import numpy as np
-import requests
-import soundfile as sf
 import yaml
 
 from echo_node.backends import AgentBackend, create_backend, REGISTRY, BACKEND_LABELS
@@ -39,8 +23,11 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT / "config.yaml"
 
 # ── Import from modular components (Phase 4) ──
+# (rms/sentence helpers live here as re-exports for scripts that did
+#  `from assistant_v2 import ...`; the single source of truth is _common.)
+from echo_node.components._common import rms_int16, sentence_chunks, pop_speakable_chunk, backend_error_message
 from echo_node.components.audio import AudioConfig, MicStream, InterruptibleSpeaker
-from echo_node.components.vad import SileroVad, Recorder
+from echo_node.components.vad import OpenWakeWordVad, SileroVad, Recorder
 from echo_node.components.wake import WakeDetector
 from echo_node.components.stt import FasterWhisperSTT, ParakeetSTT
 from echo_node.components.tts import KokoroTTS, DotsTTS, EspeakTTS
@@ -48,6 +35,23 @@ from echo_node.pipeline.router import LLMRouter
 from echo_node.pipeline.hotkey import KeyboardHotkey
 from echo_node.pipeline.integrations import HermesIntegration, PiIntegration
 from echo_node.pipeline.orchestrator import Assistant
+
+# Public re-export surface: external scripts (test.sh et al.) import these
+# names from assistant_v2. Single source of truth lives in echo_node/*.
+__all__ = [
+    "AudioConfig", "MicStream", "InterruptibleSpeaker",
+    "OpenWakeWordVad", "SileroVad", "Recorder",
+    "WakeDetector",
+    "FasterWhisperSTT", "ParakeetSTT",
+    "KokoroTTS", "DotsTTS", "EspeakTTS",
+    "LLMRouter", "KeyboardHotkey",
+    "HermesIntegration", "PiIntegration",
+    "Assistant",
+    "rms_int16", "sentence_chunks", "pop_speakable_chunk", "backend_error_message",
+    "AgentBackend", "create_backend", "REGISTRY", "BACKEND_LABELS",
+    "ConversationLogger", "TurnRecord",
+    "load_config", "validate_config", "main",
+]
 
 
 # ── Env loading ─────────────────────────────────────────────────────
@@ -120,63 +124,12 @@ def load_config(path: Path) -> dict[str, Any]:
 
 
 # ── Utilities ───────────────────────────────────────────────────────
-
-def rms_int16(samples: np.ndarray) -> float:
-    if samples.size == 0:
-        return 0.0
-    values = samples.astype(np.float32)
-    return float(math.sqrt(float(np.mean(values * values))))
+# rms/sentence/chunk helpers and backend_error_message now live in
+# echo_node.components._common (re-exported at this module's top).
 
 
-def sentence_chunks(text: str, max_chars: int = 240) -> list[str]:
-    pieces = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text.strip()) if p.strip()]
-    chunks: list[str] = []
-    current = ""
-    for piece in pieces or [text.strip()]:
-        if len(current) + len(piece) + 1 <= max_chars:
-            current = f"{current} {piece}".strip()
-        else:
-            if current:
-                chunks.append(current)
-            current = piece
-    if current:
-        chunks.append(current)
-    return chunks
+# ── Paths & validation ────────────────────────────────────────────
 
-
-def pop_speakable_chunk(text: str, max_chars: int = 240) -> tuple[str, str] | None:
-    stripped = text.strip()
-    if not stripped:
-        return None
-    match = re.search(r"(?<=[.!?])\s+", text)
-    if match:
-        return text[: match.end()].strip(), text[match.end() :]
-    if len(stripped) >= max_chars:
-        split_at = text.rfind(" ", 0, max_chars)
-        if split_at <= 0:
-            split_at = max_chars
-        return text[:split_at].strip(), text[split_at:].lstrip()
-    return None
-
-
-def backend_error_message(exc: Exception) -> str:
-    if isinstance(exc, requests.HTTPError) and exc.response is not None:
-        status = exc.response.status_code
-        if status == 402:
-            return "The configured backend requires credits or payment for that model."
-        if status == 429:
-            return "The configured backend is rate limiting this model. Try again later or switch models."
-        if status == 401:
-            return "The configured backend rejected the API key."
-        if status == 404:
-            return "The configured backend could not find that model."
-        return f"The configured backend returned HTTP {status}."
-    return f"The configured backend did not answer: {exc}"
-
-
-# ── Audio config ────────────────────────────────────────────────────
-
-@dataclass
 def _resolve_path(path_text: str) -> Path:
     return (ROOT / str(path_text)).resolve() if not str(path_text).startswith("/") else Path(str(path_text)).resolve()
 
@@ -223,8 +176,8 @@ def validate_config(config: dict[str, Any]) -> list[str]:
     # TTS
     tts = config.get("tts", {})
     tts_provider = tts.get("provider", "kokoro")
-    if tts_provider not in {"dots", "kokoro", "espeak-ng"}:
-        errors.append(f"tts.provider must be 'dots', 'kokoro', or 'espeak-ng', got {tts_provider!r}")
+    if tts_provider not in {"dots", "cosyvoice3", "kokoro", "espeak-ng"}:
+        errors.append(f"tts.provider must be 'dots', 'cosyvoice3', 'kokoro', or 'espeak-ng', got {tts_provider!r}")
     if tts_provider == "dots" and tts.get("model_path") and not _resolve_path(str(tts.get("model_path"))).exists():
         errors.append(f"dots.tts model path missing: {tts.get('model_path')}")
     if tts_provider == "kokoro":
@@ -260,28 +213,29 @@ def validate_config(config: dict[str, Any]) -> list[str]:
 
 
 # ── Main assistant ──────────────────────────────────────────────────
-
-def _play_gotit_wav() -> None:
-    """Play the 'got it' chime asynchronously via aplay.
-    If the WAV doesn't exist or aplay fails, silently ignore."""
-    if not _GOTIT_WAV.exists():
-        return
-    try:
-        subprocess.Popen(
-            ["aplay", "-q", str(_GOTIT_WAV)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        pass  # aplay not available
+# (_play_gotit_wav lives in echo_node.pipeline.orchestrator, next to Assistant)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="BabelFish voice assistant")
+    parser = argparse.ArgumentParser(description="Echo-Node v2 voice assistant")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     args = parser.parse_args()
     try:
-        return Assistant(load_config(Path(args.config))).run()
+        config = load_config(Path(args.config))
+    except Exception as exc:
+        print(f"[error] {exc}", file=sys.stderr)
+        return 1
+    try:
+        errors = validate_config(config)
+    except Exception as exc:
+        print(f"[error] config validation failed: {exc}", file=sys.stderr)
+        return 1
+    if errors:
+        for err in errors:
+            print(f"[config] {err}", file=sys.stderr)
+        return 1
+    try:
+        return Assistant(config).run()
     except Exception as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1

@@ -166,7 +166,9 @@ class HTTPAgent(Agent):
                     err += " | " + e.read().decode()[:200]
                 except Exception:
                     pass
-            return AgentResult(f"ERROR: {err}", elapsed, cost or CostTracker(), self.name, self.model_name, success=False)
+            return AgentResult(
+                f"The {self.name} agent did not answer: {err}",
+                elapsed, cost or CostTracker(), self.name, self.model_name, success=False)
 
     def get_capabilities(self) -> list[str]:
         caps = ["Text in/out via HTTP", f"Model: {self.model_name}"]
@@ -175,6 +177,32 @@ class HTTPAgent(Agent):
         if self.supports_sessions:
             caps.append("Session persistence")
         return caps
+
+
+# ── CLI gateway command ─────────────────────────────────────────────
+# The "xx" placeholder below stands in for the author's private gateway
+# binary (redacted before push).  Point at the real binary with the
+# ECHO_CLI_GATEWAY env var, or pass config={"cli_gateway": ...} to
+# get_all_agents().  Until configured, CLI agents report a clear message
+# instead of raising FileNotFoundError.
+
+_CLI_GATEWAY_PLACEHOLDER = "xx"
+
+
+def _cli_gateway_command(config: dict[str, Any] | None, *suffix: str) -> list[str]:
+    """Build the CLI agent command: [gateway, *suffix].
+
+    Resolution order: config["cli_gateway"] → ECHO_CLI_GATEWAY env var →
+    the "xx" placeholder (reported as "not configured" at respond() time).
+    """
+    gateway = ""
+    if config:
+        gateway = str(config.get("cli_gateway", "") or "").strip()
+    if not gateway:
+        gateway = os.environ.get("ECHO_CLI_GATEWAY", "").strip()
+    if not gateway:
+        return [_CLI_GATEWAY_PLACEHOLDER, *suffix]
+    return [gateway, *suffix]
 
 
 # ── CLI Agent (subprocess) ──────────────────────────────────────────
@@ -194,6 +222,14 @@ class CLIAgent(Agent):
         self.model_name = command[0]
 
     def respond(self, text: str, system: str = "", cost: CostTracker | None = None) -> AgentResult:
+        # Never let the placeholder binary reach subprocess: report it
+        # cleanly instead of a FileNotFoundError traceback.
+        if self.command and self.command[0] == _CLI_GATEWAY_PLACEHOLDER:
+            return AgentResult(
+                "The CLI gateway is not configured. Set the ECHO_CLI_GATEWAY "
+                "environment variable (or cli_gateway in config) to the gateway "
+                "binary to enable this agent.",
+                0.0, cost or CostTracker(), self.name, self.model_name, success=False)
         cmd = self.command + ["-p", text]
         t0 = time.perf_counter()
         try:
@@ -206,11 +242,14 @@ class CLIAgent(Agent):
             return AgentResult(output, elapsed, cost or CostTracker(), self.name, self.model_name)
         except subprocess.TimeoutExpired:
             elapsed = time.perf_counter() - t0
-            return AgentResult(f"TIMEOUT after {self.timeout}s", elapsed, cost or CostTracker(),
+            return AgentResult(f"The {self.name} agent timed out after {self.timeout} seconds.",
+                               elapsed, cost or CostTracker(),
                                self.name, self.model_name, success=False)
         except Exception as e:
             elapsed = time.perf_counter() - t0
-            return AgentResult(f"ERROR: {e}", elapsed, cost or CostTracker(),
+            # Spoken-safe: no tracebacks or bracket tags (results feed TTS).
+            return AgentResult(f"The {self.name} agent did not answer: {e}",
+                               elapsed, cost or CostTracker(),
                                self.name, self.model_name, success=False)
 
     def get_capabilities(self) -> list[str]:
@@ -221,8 +260,12 @@ class CLIAgent(Agent):
 
 
 # ── Agent Profiles ──────────────────────────────────────────────────
-def get_all_agents() -> dict[str, Agent]:
-    """Return all configured agents keyed by short name."""
+def get_all_agents(config: dict[str, Any] | None = None) -> dict[str, Agent]:
+    """Return all configured agents keyed by short name.
+
+    ``config`` is optional; ``config["cli_gateway"]`` (or the
+    ECHO_CLI_GATEWAY env var) sets the binary used by the CLI agents.
+    """
     OR_KEY = os.environ.get("OPENROUTER_API_KEY", "")  # injected at runtime
     OC_KEY = os.environ.get("OPENAI_API_KEY", "")  # injected at runtime
 
@@ -275,21 +318,21 @@ def get_all_agents() -> dict[str, Agent]:
         ),
         "claude": CLIAgent(
             name="🤖 Claude Code",
-            command=["xx", "cip"],
+            command=_cli_gateway_command(config, "cip"),
             cost_per_hour="$0.00 (via free OR)",
-            description="Anthropic Claude via Clutch Gateway, full coding agent",
+            description="Anthropic Claude via CLI gateway (set ECHO_CLI_GATEWAY), full coding agent",
         ),
         "pi": CLIAgent(
             name="🧩 Pi Agent",
-            command=["xx", "pip"],
+            command=_cli_gateway_command(config, "pip"),
             cost_per_hour="$0.00 (via free OR)",
-            description="Pi coding assistant via Clutch Gateway",
+            description="Pi coding assistant via CLI gateway (set ECHO_CLI_GATEWAY)",
         ),
         "codex": CLIAgent(
             name="📝 Codex",
-            command=["xx", "xip"],
+            command=_cli_gateway_command(config, "xip"),
             cost_per_hour="$0.00 (via free OR)",
-            description="OpenAI Codex via Clutch Gateway",
+            description="OpenAI Codex via CLI gateway (set ECHO_CLI_GATEWAY)",
         ),
     }
 
@@ -306,17 +349,61 @@ class SmartRouter:
         self._call_costs: list[dict] = []
 
     def classify(self, text: str) -> str:
-        """Determine which agent should handle this query."""
+        """Determine which agent should handle this query.
+
+        Keyword-based, deterministic routing:
+          tool / action / system keywords → hermes (tool calling + sessions)
+          audio-native requests           → gpt-audio-mini (gpt-audio for top quality)
+          reasoning-heavy queries        → nemotron (550B, free tier)
+          quick factual lookups          → fast (OpenRouter free, ~0.7s)
+          everything else                → default (hermes)
+        """
         lower = text.lower()
 
-        # Everything routes to hermes (only working backend right now).
-        # Hermes Agent at :8642 is running and has full tool calling.
-        # Other agents are preserved as options for future use.
-        tool_keywords = ["search", "web", "find", "look up", "browse", "scrape",
-                         "email", "send", "message", "slack", "discord",
-                         "download", "upload", "api", "curl"]
+        # 1. Tool / action / system — needs Hermes' tool calling + sessions.
+        tool_keywords = [
+            "search", "web", "find", "look up", "browse", "scrape",
+            "email", "send", "message", "slack", "discord",
+            "download", "upload", "api", "curl",
+            "run ", "execute", "schedule", "remind", "timer", "alarm",
+            "open ", "launch ", "create a file", "delete", "write to",
+            "ssh", "deploy",
+        ]
         if any(kw in lower for kw in tool_keywords):
             return "hermes"
+
+        # 2. Audio-native requests — spoken output, accents, pronunciation.
+        audio_quality_keywords = ["best quality", "highest quality", "studio quality"]
+        audio_keywords = [
+            "say ", "speak", "read aloud", "read this", "pronounce",
+            "pronunciation", "sing", "voice", "audio", "listen",
+            "accent", "whisper", "shout",
+        ]
+        if any(kw in lower for kw in audio_quality_keywords):
+            return "gpt-audio"
+        if any(kw in lower for kw in audio_keywords):
+            return "gpt-audio-mini"
+
+        # 3. Reasoning-heavy — Nemotron Ultra (550B, free tier).
+        reasoning_keywords = [
+            "prove", "proof", "explain why", "reason", "think through",
+            "pros and cons", "compare", "analyze", "analysis", "debug",
+            "architect", "design", "step by step", "puzzle", "algorithm",
+            "theorem", "derive",
+        ]
+        if any(kw in lower for kw in reasoning_keywords):
+            return "nemotron"
+
+        # 4. Quick factual lookups — fast free tier (~0.7s).
+        fast_keywords = [
+            "what time", "what date", "what day", "weather",
+            "define ", "meaning of", "who is", "what is", "what are",
+            "how old", "how tall", "capital of", "population",
+            "translate", "how many", "when is", "where is",
+        ]
+        if any(kw in lower for kw in fast_keywords):
+            return "fast"
+
         return self.default
 
     def route(self, text: str, system: str = "") -> AgentResult:

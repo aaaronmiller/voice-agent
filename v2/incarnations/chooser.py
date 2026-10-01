@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import signal
 import subprocess
 import sys
@@ -105,7 +106,14 @@ class Incarnation:
         else:
             tmpl = self.command.get("linux", "")
         cwd_abs = str((_REPO / self.cwd).resolve())
-        return tmpl.replace("${CWD}", cwd_abs)
+        tmpl = tmpl.replace("${CWD}", cwd_abs)
+        # Substitute user-controlled values here (quoted) instead of letting
+        # the shell expand them from the environment: with shell=True, a value
+        # like $(...) in ${VAR} would be command-substituted by bash.
+        for key in self.settings:
+            env_key = key.upper().replace(".", "_")
+            tmpl = tmpl.replace(f"${{{env_key}}}", shlex.quote(str(self.get_value(key))))
+        return tmpl
 
     def get_env(self) -> dict[str, str]:
         env = os.environ.copy()

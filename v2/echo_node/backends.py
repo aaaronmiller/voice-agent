@@ -11,6 +11,10 @@ Available backends:
   openai      → OpenAI API (direct)
   openrouter  → OpenRouter API (direct)
 
+Experimental (voice-native, standalone CLI only — not text chat backends):
+  gemini_live     → Gemini Multimodal Live API
+  openai_realtime → OpenAI Realtime API
+
 A CLI backend (claude / codex) is useful when you want local tool-calling
 without running a full agent server.  A direct API backend (openai /
 openrouter) is useful when you want a specific model and don't need tools.
@@ -33,6 +37,28 @@ import requests
 
 
 # ── Backend registry ────────────────────────────────────────────────
+
+def _spoken_error(name: str, exc: Exception) -> str:
+    """Build a TTS-safe error message for a failed backend call.
+
+    Backend ``chat()`` results flow straight into TTS in the assistant
+    loop, so a failure must come back as a speakable sentence — never a
+    raw traceback or a ``[bracket tag]`` the voice would read aloud.
+    Mirrors ``backend_error_message()`` in ``assistant_v2.py``.
+    """
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        status = exc.response.status_code
+        if status == 402:
+            return f"The {name} backend needs credits or payment for that model."
+        if status == 429:
+            return f"The {name} backend is rate limiting requests. Try again later."
+        if status == 401:
+            return f"The {name} backend rejected the API key."
+        if status == 404:
+            return f"The {name} backend could not find that model."
+        return f"The {name} backend returned HTTP {status}."
+    return f"The {name} backend did not answer: {exc}"
+
 
 @dataclass
 class AgentBackend(ABC):
@@ -79,7 +105,10 @@ class HermesBackend(AgentBackend):
     def is_available(self) -> bool:
         try:
             base = str(self.config.get("base_url", "http://127.0.0.1:8642/v1")).rstrip("/")
-            health = base.rstrip("/v1").rstrip("/") + "/health"
+            # Strip a trailing "/v1" API suffix with endswith(), NOT str.rstrip():
+            # rstrip("/v1") strips a *character set*, so "http://host:8641/v1"
+            # would be corrupted to "http://host:864".
+            health = (base[:-3] if base.endswith("/v1") else base).rstrip("/") + "/health"
             r = requests.get(health, timeout=3)
             return r.status_code == 200
         except Exception:
@@ -109,7 +138,7 @@ class HermesBackend(AgentBackend):
             r.raise_for_status()
             return str(r.json()["choices"][0]["message"]["content"]).strip()
         except Exception as exc:
-            return f"[Hermes error] {exc}"
+            return _spoken_error("Hermes", exc)
 
     def chat_stream(self, text: str, system: str = "") -> Iterable[tuple[str, bool]]:
         base = str(self.config.get("base_url", "http://127.0.0.1:8642/v1")).rstrip("/")
@@ -150,7 +179,7 @@ class HermesBackend(AgentBackend):
                         yield piece, first
                         first = False
         except Exception as exc:
-            yield f"[Hermes stream error] {exc}", True
+            yield _spoken_error("Hermes", exc), True
 
 
 # ── Pi Agent ────────────────────────────────────────────────────────
@@ -173,9 +202,9 @@ class PiBackend(AgentBackend):
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
             return (result.stdout or result.stderr or "(no output)").strip()
         except subprocess.TimeoutExpired:
-            return f"[Pi timeout] No response after {self.timeout}s."
+            return f"The Pi agent timed out after {self.timeout} seconds."
         except Exception as exc:
-            return f"[Pi error] {exc}"
+            return _spoken_error("Pi", exc)
 
 
 # ── Claude Code (headless) ──────────────────────────────────────────
@@ -216,9 +245,9 @@ class ClaudeCodeBackend(AgentBackend):
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
             return (result.stdout or result.stderr or "(no output)").strip()
         except subprocess.TimeoutExpired:
-            return f"[Claude timeout] No response after {self.timeout}s."
+            return f"Claude Code timed out after {self.timeout} seconds."
         except Exception as exc:
-            return f"[Claude error] {exc}"
+            return _spoken_error("Claude Code", exc)
 
 
 # ── Codex CLI ───────────────────────────────────────────────────────
@@ -257,9 +286,9 @@ class CodexBackend(AgentBackend):
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
             return (result.stdout or result.stderr or "(no output)").strip()
         except subprocess.TimeoutExpired:
-            return f"[Codex timeout] No response after {self.timeout}s."
+            return f"Codex timed out after {self.timeout} seconds."
         except Exception as exc:
-            return f"[Codex error] {exc}"
+            return _spoken_error("Codex", exc)
 
 
 # ── Direct OpenAI API ───────────────────────────────────────────────
@@ -326,7 +355,7 @@ class OpenAIBackend(AgentBackend):
 
             return reply
         except Exception as exc:
-            return f"[OpenAI error] {exc}"
+            return _spoken_error("OpenAI", exc)
 
     def chat_stream(self, text: str, system: str = "") -> Iterable[tuple[str, bool]]:
         messages: list[dict[str, str]] = []
@@ -366,7 +395,7 @@ class OpenAIBackend(AgentBackend):
                         yield piece, first
                         first = False
         except Exception as exc:
-            yield f"[OpenAI stream error] {exc}", True
+            yield _spoken_error("OpenAI", exc), True
             return
 
         # Store assistant reply in history
@@ -437,7 +466,7 @@ class OpenRouterBackend(AgentBackend):
 
             return reply
         except Exception as exc:
-            return f"[OpenRouter error] {exc}"
+            return _spoken_error("OpenRouter", exc)
 
     def chat_stream(self, text: str, system: str = "") -> Iterable[tuple[str, bool]]:
         messages: list[dict[str, str]] = []
@@ -478,7 +507,7 @@ class OpenRouterBackend(AgentBackend):
                         yield piece, first
                         first = False
         except Exception as exc:
-            yield f"[OpenRouter stream error] {exc}", True
+            yield _spoken_error("OpenRouter", exc), True
             return
 
         if self.max_history > 0 and full_reply:
@@ -487,6 +516,67 @@ class OpenRouterBackend(AgentBackend):
             self._history.append({"role": "assistant", "content": reply})
             if len(self._history) > self.max_history * 2:
                 self._history = self._history[-(self.max_history * 2):]
+
+
+# ── Experimental: live-voice providers ────────────────────────────
+#
+# NOTE: Gemini Live and OpenAI Realtime are voice-native WebSocket
+# providers, NOT text chat backends.  They run as standalone interactive
+# CLI apps with their own mic/speaker loops (run from v2/):
+#   python providers/gemini_live.py
+#   python providers/openai_realtime.py
+# They are registered here so tooling can enumerate them.  The text
+# chat() path is intentionally unsupported — chat() returns a spoken-safe
+# pointer to the CLI instead of faking a text response.
+#
+# Model IDs below were flagged STALE in the 2026-09 audit — re-verify
+# against current provider docs before use:
+#   gemini-3.1-flash-live-preview, gpt-4o-realtime-preview(-2024-12-17)
+
+class GeminiLiveBackend(AgentBackend):
+    """Experimental: Gemini Multimodal Live API (voice-native).
+
+    Requires GEMINI_API_KEY.  Standalone CLI (run from v2/):
+    ``python providers/gemini_live.py``.
+    """
+
+    name: str = "Gemini Live (experimental)"
+    config_key: str = "gemini_live"
+    # STALE? re-verify — flagged in 2026-09 audit
+    default_model: str = "gemini-3.1-flash-live-preview"
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config=config)
+
+    def is_available(self) -> bool:
+        return bool(self.config.get("api_key") or os.environ.get("GEMINI_API_KEY"))
+
+    def chat(self, text: str, system: str = "") -> str:
+        return ("Gemini Live is a voice-native provider, not a text backend. "
+                "Run it directly: python providers/gemini_live.py")
+
+
+class OpenAIRealtimeBackend(AgentBackend):
+    """Experimental: OpenAI Realtime API (voice-native).
+
+    Requires OPENAI_API_KEY.  Standalone CLI (run from v2/):
+    ``python providers/openai_realtime.py``.
+    """
+
+    name: str = "OpenAI Realtime (experimental)"
+    config_key: str = "openai_realtime"
+    # STALE? re-verify — flagged in 2026-09 audit
+    default_model: str = "gpt-4o-realtime-preview-2024-12-17"
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config=config)
+
+    def is_available(self) -> bool:
+        return bool(self.config.get("api_key") or os.environ.get("OPENAI_API_KEY"))
+
+    def chat(self, text: str, system: str = "") -> str:
+        return ("OpenAI Realtime is a voice-native provider, not a text backend. "
+                "Run it directly: python providers/openai_realtime.py")
 
 
 # ── Registry ────────────────────────────────────────────────────────
@@ -498,6 +588,9 @@ REGISTRY: dict[str, type[AgentBackend]] = {
     "codex": CodexBackend,
     "openai": OpenAIBackend,
     "openrouter": OpenRouterBackend,
+    # Experimental voice-native providers (standalone CLI; chat() unsupported)
+    "gemini_live": GeminiLiveBackend,
+    "openai_realtime": OpenAIRealtimeBackend,
 }
 
 # Labels for the settings popup dropdown (provider_key → display name)

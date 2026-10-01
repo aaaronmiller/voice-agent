@@ -4,14 +4,18 @@
 Replaces the raccoon-hacker sprite with a real-time talking head
 generated from a source photo + audio via MuseTalk.
 
-Architecture:
+Status: PROTOTYPE. The MuseTalk rendering path works standalone, but the
+live assistant_v2 pipeline (wake word → STT → LLM → TTS feeding the
+renderer) is NOT wired up yet — both modes below currently render from
+synthetic test audio. Target architecture once wired:
+
   VAD → Whisper STT → Hermes LLM → Kokoro TTS ─┐
                                                 ├→ MuseTalk → avatar window
   Source photo → VAE encode ────────────────────┘
 
 Usage:
   python musetalk_assistant.py --photo face.jpg
-  python musetalk_assistant.py --photo face.jpg --demo  (no wake word)
+  python musetalk_assistant.py --photo face.jpg --demo  (synthetic-audio demo)
 """
 
 from __future__ import annotations
@@ -52,7 +56,9 @@ class MuseTalkRenderer:
     def __init__(self, photo_path: str, manifest_path: str | None = None,
                  fps: int = 25, batch_size: int = 16, audio_padding: int = 2):
         self.photo_path = photo_path
-        self.manifest_path = manifest_path or str(REPO / "avatar_video/models/manifest.json")
+        # Default manifest lives at avatar_video/models/manifest.json
+        # (REPO is the avatar_video/ directory itself).
+        self.manifest_path = manifest_path or str(REPO / "models/manifest.json")
         self.fps = fps
         self.batch_size = batch_size
         self.audio_padding = audio_padding
@@ -205,7 +211,8 @@ def main():
     parser.add_argument("--models", default=None,
                         help="Path to models directory")
     parser.add_argument("--demo", action="store_true",
-                        help="Run demo loop instead of full assistant")
+                        help="Run the synthetic-audio demo loop "
+                             "(live assistant_v2 integration is not wired yet)")
     parser.add_argument("--fps", type=int, default=25,
                         help="Output frame rate")
     parser.add_argument("--batch-size", type=int, default=16,
@@ -224,8 +231,14 @@ def main():
     print("║   Echo-Node MuseTalk Local Avatar v0.1      ║")
     print("╚══════════════════════════════════════════════╝")
     print(f"  Source photo: {photo_path}")
-    print(f"  GPU: {torch.cuda.get_device_properties(0).name}")
-    print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory/1024**3:.1f}GB")
+    if not torch.cuda.is_available():
+        print("[MuseTalk] ERROR: no NVIDIA GPU detected "
+              "(torch.cuda.is_available() is False).")
+        print("  MuseTalk needs a CUDA GPU for real-time inference — exiting.")
+        sys.exit(2)
+    props = torch.cuda.get_device_properties(0)
+    print(f"  GPU: {props.name}")
+    print(f"  VRAM: {props.total_memory/1024**3:.1f}GB")
 
     renderer = MuseTalkRenderer(
         photo_path, fps=args.fps, batch_size=args.batch_size
@@ -233,15 +246,23 @@ def main():
 
     print(f"\n[MuseTalk] Loading models (~8s, ~1.9GB VRAM)...")
     t0 = time.time()
-    renderer.load()
+    try:
+        renderer.load()
+    except RuntimeError as exc:
+        # Covers missing manifest.json / missing model files (see
+        # AvatarVideo.load_models) with a human-readable message.
+        print(f"[MuseTalk] ERROR: {exc}")
+        sys.exit(1)
     print(f"[MuseTalk] Loaded in {time.time()-t0:.1f}s")
 
-    # For now: run a live demo loop with test audio
-    # In production this will call the full assistant_v2 pipeline
+    # NOTE: live assistant_v2 integration is not implemented yet (see the
+    # TODO below). Both modes currently run the synthetic-audio demo loop;
+    # --demo just makes that explicit instead of implying a full assistant.
     avatar = DummyAvatarWindow()
 
     try:
         if args.demo:
+            print("[MuseTalk] --demo: rendering talking head from synthetic test audio.")
             live_loop(renderer, avatar)
         else:
             # TODO: Launch full assistant with MuseTalk renderer
@@ -250,6 +271,10 @@ def main():
             #   - STT → LLM → TTS
             #   - TTS audio → renderer.generate()
             #   - Avatar window shows renderer frames
+            # Until that is wired, run the demo loop so the script does
+            # something observable instead of failing silently.
+            print("[MuseTalk] NOTE: full assistant integration is not wired yet; "
+                  "running the demo loop.")
             live_loop(renderer, avatar)
 
     except KeyboardInterrupt:

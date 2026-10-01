@@ -6,13 +6,13 @@ This is the CLI-FIRST implementation of the Gemini Live voice agent.
 It proves the low-latency (~500ms) voice path works BEFORE any TUI
 or Web frontend is built.
 
-Usage:
+Usage (run from v2/):
   export GEMINI_API_KEY="your-key-here"
-  python -m echo_node.providers.gemini_live
+  python providers/gemini_live.py
 
   # Or via env var overrides:
   GEMINI_MODEL=gemini-3.1-flash-live-preview GEMINI_VOICE=Puck \\
-    python -m echo_node.providers.gemini_live
+    python providers/gemini_live.py
 
 Exit:
   Ctrl+C to quit. Interruptions are handled by Gemini natively.

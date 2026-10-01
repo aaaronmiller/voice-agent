@@ -14,6 +14,9 @@ OpenAI Realtime (gpt-4o-realtime-preview):
 
 Google Gemini Live (gemini-3.1-flash-live-preview):
   Currently FREE during preview period.
+
+NOTE (2026-09 audit): the model IDs and rates above were flagged STALE —
+re-verify against current provider docs before relying on them.
 """
 
 from __future__ import annotations

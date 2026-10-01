@@ -33,6 +33,11 @@ import torch
 AVATAR_DIR = Path(__file__).resolve().parent
 MODELS_DIR = AVATAR_DIR / "models"
 MANIFEST_PATH = MODELS_DIR / "manifest.json"
+
+# Manifest keys required by load_models(). Each value is a path (absolute, or
+# relative to AVATAR_DIR) to files from the official MuseTalk v1.5 release:
+# https://github.com/TMElyralab/MuseTalk/releases
+REQUIRED_MANIFEST_KEYS = ("unet_config", "unet_path", "vae_dir", "whisper_dir")
 os.chdir(str(AVATAR_DIR))
 
 import sys
@@ -93,12 +98,51 @@ class AvatarVideo:
         t0 = time.time()
         m = self.manifest
 
+        # ── Validate manifest before touching m["..."] ──
+        # (models/ is gitignored, so a fresh checkout has no manifest.json
+        # at all — fail here with instructions, not a bare KeyError.)
+        missing = [k for k in REQUIRED_MANIFEST_KEYS if k not in m]
+        if missing:
+            raise RuntimeError(
+                "[AvatarVideo] No usable model manifest: "
+                f"{MANIFEST_PATH} is missing or does not define {missing}. "
+                "Download the MuseTalk v1.5 model files from the official release "
+                "(https://github.com/TMElyralab/MuseTalk/releases), place them under "
+                f"{MODELS_DIR}/, then create manifest.json mapping 'unet_config', "
+                "'unet_path', 'vae_dir' and 'whisper_dir' to those files/directories."
+            )
+        bad = []
+        for k in REQUIRED_MANIFEST_KEYS:
+            p = Path(m[k])
+            if not p.is_absolute():
+                p = AVATAR_DIR / p
+            if not p.exists():
+                bad.append(f"{k} -> {m[k]}")
+        if bad:
+            raise RuntimeError(
+                "[AvatarVideo] Model files listed in the manifest are missing: "
+                + "; ".join(bad)
+                + ". Download them from https://github.com/TMElyralab/MuseTalk/releases "
+                f"and place them under {MODELS_DIR}/."
+            )
+
         # ── UNet ──
         with open(m["unet_config"]) as f:
             unet_cfg = json.load(f)
         from diffusers import UNet2DConditionModel
         self.model = UNet2DConditionModel(**unet_cfg).to(self.device, dtype=torch.float16)
-        sd = torch.load(m["unet_path"], map_location="cpu", weights_only=False)
+        # weights_only=True blocks arbitrary code execution from a tampered
+        # checkpoint file. This checkpoint is consumed as a plain state dict
+        # below, so the safe loader is sufficient. Fall back to the unsafe
+        # loader only if the file genuinely contains non-tensor objects —
+        # and say so loudly.
+        try:
+            sd = torch.load(m["unet_path"], map_location="cpu", weights_only=True)
+        except Exception as exc:
+            print(f"[AvatarVideo] WARNING: {m['unet_path']} is not a pure tensor "
+                  f"checkpoint ({exc}); loading with weights_only=False. "
+                  "Only use model files from trusted sources.")
+            sd = torch.load(m["unet_path"], map_location="cpu", weights_only=False)
         self.model.load_state_dict(sd, strict=False)
         del sd
 
@@ -118,11 +162,14 @@ class AvatarVideo:
         self.ap = AudioProcessor(feature_extractor_path=m["whisper_dir"])
         self.fp = FaceParsing(left_cheek_width=90, right_cheek_width=90)
 
-        torch.cuda.synchronize()
         self._models_loaded = True
         self._load_time = time.time() - t0
-        print(f"[AvatarVideo] Models loaded in {self._load_time:.1f}s, "
-              f"GPU: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            print(f"[AvatarVideo] Models loaded in {self._load_time:.1f}s, "
+                  f"GPU: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
+        else:
+            print(f"[AvatarVideo] Models loaded in {self._load_time:.1f}s (CPU mode)")
         return self._load_time
 
     # ── Face pre-processing ──────────────────────────────────────

@@ -5,12 +5,12 @@ Echo-Node: OpenAI Realtime API — standalone CLI mode.
 CLI-first implementation of the OpenAI Realtime voice agent.
 Proves the low-latency (~450ms) voice path works.
 
-Usage:
+Usage (run from v2/):
   export OPENAI_API_KEY="your-key-here"
-  python -m echo_node.providers.openai_realtime
+  python providers/openai_realtime.py
 
   # Options:
-  python -m echo_node.providers.openai_realtime --voice alloy --model gpt-4o-realtime-preview
+  python providers/openai_realtime.py --voice alloy --model gpt-4o-realtime-preview
 """
 
 from __future__ import annotations

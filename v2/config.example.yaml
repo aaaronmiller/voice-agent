@@ -38,7 +38,7 @@ wake_word:
   model_paths: []
 
 vad:
-  provider: silero-openwakeword
+  provider: openwakeword  # label only; the VAD is OpenWakeWord's VAD + RMS floor
   speech_threshold: 0.48
   silence_seconds: 0.85
   max_record_seconds: 18
@@ -48,9 +48,16 @@ vad:
 
 barge_in:
   enabled: true
-  min_speech_seconds: 0.22
+  min_speech_seconds: 0.22  # debounce: sustained speech before interrupting
   min_playback_age_seconds: 0.45
-  resume_false_interruptions: false
+  # Barge-in hardening (see InterruptibleSpeaker):
+  #  - boosted thresholds during playback so speaker bleed can't interrupt
+  #    (effective VAD threshold ≈ 0.48*1.8 ≈ 0.86; RMS floor ≈ 350*2.0 = 700)
+  playback_threshold_boost: 1.8
+  playback_rms_boost: 2.0
+  playback_start_grace_s: 0.3  # extra boost in the first 0.3s of each chunk
+  bargein_end_grace_s: 0.12  # hysteresis: sustained silence before dropping a pending interrupt
+  resume_false_interruptions: false  # vestigial: no longer read by code
 
 hotkeys:
   enabled: true
@@ -64,7 +71,9 @@ performance:
 
 stt:
   provider: onnx-asr
-  model_name: nemo-parakeet-tdt-0.6b-v2
+  # Parakeet TDT v3 0.6B (drop-in upgrade over v2; auto-downloaded by onnx-asr).
+  # Falls back to nemo-parakeet-tdt-0.6b-v2 automatically if v3 fails to load.
+  model_name: istupakov/parakeet-tdt-0.6b-v3-onnx
   quantization: int8
   providers:
     - CPUExecutionProvider
@@ -78,6 +87,8 @@ llm:
   keep_alive: 30m
 
 tts:
+  # Provider: kokoro (default, low-latency ONNX), dots (GPU, expressive),
+  # cosyvoice3 (GPU, higher quality + zero-shot cloning; experimental), espeak-ng (CPU fallback).
   provider: kokoro
   voice: af_heart
   speed: 1.0
@@ -87,6 +98,18 @@ tts:
   espeak_voice: en-us
   espeak_speed: 165
   espeak_pitch: 45
+  # CosyVoice 3 options (only used when provider: cosyvoice3):
+  # model_path: models/cosyvoice3-0.5b
+  # prompt_wav: path/to/voice-clone-reference.wav
+  # prompt_text: "transcript of the reference audio"
+  # instruction: "speak cheerfully"
+  # language: en
+
+# Response-generation backend — the agent that answers. Valid providers:
+# hermes (default, local tool-use server), pi, claude, codex, openai, openrouter.
+# gemini_live and openai_realtime are experimental (voice-native, unverified here).
+backend:
+  provider: hermes
 
 # Speech formatting — truncates long replies, summarizes tables, strips markdown.
 # Say "be verbose" to get full replies, "be concise" to reset.
