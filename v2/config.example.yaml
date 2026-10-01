@@ -138,3 +138,43 @@ avatar:
   recognizer: phonetic          # rhubarb recognizer: phonetic (fast) or pocketSphinx
   extended_shapes: GH           # optional extra mouth shapes
   rhubarb_path: null            # null = auto-detect
+
+# ── External providers (Phase B) ──────────────────────────────────────
+# Any program speaking the JSON-RPC 2.0 adapter protocol on stdio can take
+# a slot's place (spec: echo_node/adapters/PROTOCOL.md). Entries are
+# declared HERE — the config file is the trust boundary. The settings UI
+# never accepts executable paths; it only lists validated providers.
+#
+# external_providers:
+#   # whisper.cpp STT via the shipped reference adapter.
+#   - slot: stt
+#     name: whispercpp
+#     command: ["builtin:stt_whispercpp.py"]   # builtin:<file> = repo-shipped
+#     args: ["--model", "/models/ggml-base.bin", "--binary", "whisper-cli"]
+#     label: "whisper.cpp (external)"
+#     request_timeout_s: 60.0
+#     idle_timeout_s: 120.0
+#     max_restarts: 3
+#
+#   # Piper TTS via the shipped reference adapter.
+#   - slot: tts
+#     name: piper
+#     command: ["builtin:tts_piper.py"]
+#     args: ["--model", "/models/en_US-amy-medium.onnx"]
+#     label: "Piper (external)"
+#
+#   # A third-party adapter: explicit argv, resolved from $PATH like any
+#   # other subprocess. No `builtin:` magic — the config file says exactly
+#   # what runs.
+#   - slot: agent_backend
+#     name: my-agent
+#     command: ["/opt/my-agent/bin/adapter", "--config", "/etc/my-agent.yaml"]
+#     label: "My agent (external)"
+#     experimental: true
+#
+# Rules: `name` must be unique per slot (collisions with built-ins are a
+# startup error); `slot` must be one of stt, tts, vad, wake_word,
+# agent_backend (avatar/audio_io/barge_in are not subprocess-servable in
+# Phase B); `command[0]` may be `builtin:<file>` only for the shipped
+# adapters in echo_node/adapters/ (no "..", no separators, exact name).
+# Any schema violation fails startup with a plain message.

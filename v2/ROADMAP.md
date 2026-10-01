@@ -110,6 +110,28 @@ VRAM on the 4050, Nemotron-3.5-ASR license, sherpa-onnx KWS model license.
 - **Phase B — SubprocessAdapter.** JSON-RPC-over-stdio adapter; 2–3 external
   adapters as proof (e.g. a whisper.cpp STT, a Piper-style TTS). Validates the
   "any program can take a slot's place" claim end to end.
+  - Status (2026-10-01): **built, awaiting real-hardware validation.**
+    `echo_node/adapters/` — `protocol.py` (shared JSON-RPC 2.0 framing,
+    child main loop, PCM/wav helpers; importable without the echo_node
+    package so adapter children stay self-contained), `subprocess_adapter.py`
+    (host: lazy spawn, initialize handshake with version check,
+    per-call timeouts → `AdapterTimeout`, transparent restart-on-crash
+    with `max_restarts` → `AdapterCrashed`, kill-on-idle reaping,
+    malformed child lines logged-and-ignored, stderr drained),
+    `__init__.py` (`register_external_providers`: config-schema
+    validation, `builtin:` allowlist resolution, name-collision/unknown-slot
+    startup errors), three executable reference adapters
+    (`stt_whispercpp.py`, `tts_piper.py`, `stt_reference.py` — faster-whisper
+    shim that never downloads models), `PROTOCOL.md` (spec + trust model).
+    Slots served: stt, tts, vad, wake_word, agent_backend (`chat` method).
+    The config file is the trust boundary — settings UI never accepts
+    executable paths; validated externals appear in the existing
+    registry-driven dropdowns marked " (external)".
+    Conformance suite `echo_node/tests/test_phase_b.py` — 37 checks pass
+    on a bare VM (fake adapter modes: echo/hang/crash-once/crash-always/
+    garbage; shipped adapters honestly report missing binaries/models).
+    Batch-only; no streaming methods yet. Real gate: run a whisper.cpp /
+    Piper adapter on Aaron's hardware.
 - **Phase C — substitution sweep**, in the payoff order of §2.
 - **Phase D — Wyoming TCP adapters, avatar slot, capability intersection.**
   The UI only offers combinations whose capabilities intersect (e.g. no

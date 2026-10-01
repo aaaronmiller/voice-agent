@@ -59,6 +59,17 @@
 - [x] Conformance suite `echo_node/tests/test_phase_a.py`: 93 checks pass on bare VM (selection equivalence, ABC conformance, experimental exclusion, no config key renamed, graceful validation)
 - [ ] Real-hardware validation pass on Aaron's machine (GPU/audio/models) — the true gate for Phase A
 
+### Phase B — Subprocess Adapters (ROADMAP.md)
+- [x] `echo_node/adapters/protocol.py`: shared JSON-RPC 2.0 framing, child main loop (`run_adapter`), PCM/wav helpers; importable without the echo_node package
+- [x] `echo_node/adapters/subprocess_adapter.py`: host with lazy spawn, initialize handshake + version check, per-call timeouts (`AdapterTimeout`), transparent restart-on-crash (`max_restarts` → `AdapterCrashed`), kill-on-idle reaping, malformed child lines logged-and-ignored, stderr drained; per-slot classes for stt/tts/vad/wake_word/agent_backend (`chat` method)
+- [x] `echo_node/adapters/__init__.py`: `register_external_providers()` — config-schema validation, `builtin:` allowlist resolution (traversal-proof), name-collision/unknown-slot startup errors; `ProviderInfo.external` flag
+- [x] Three executable reference adapters: `stt_whispercpp.py` (wraps whisper.cpp CLI), `tts_piper.py` (wraps Piper binary + voice model), `stt_reference.py` (faster-whisper shim, never downloads models) — all report missing binaries/models honestly
+- [x] Startup wiring in `assistant_v2.py` (`register_external_providers` after `load_config`, before `validate_config`); config file is the trust boundary — no executable paths in any settings UI
+- [x] Dropdown marking: validated externals get " (external)" suffix in STT/TTS combos (label/userData split, config keys untouched) and `BACKEND_OPTIONS`
+- [x] `echo_node/adapters/PROTOCOL.md` (protocol spec + trust model); `config.example.yaml` `external_providers:` commented examples
+- [x] Conformance suite `echo_node/tests/test_phase_b.py`: 37 checks pass on bare VM (fake adapter modes echo/hang/crash-once/crash-always/garbage; handshake, round-trips, timeout, restart, exhaustion, idle-reap, traversal rejection, schema errors, honest self-probes)
+- [ ] Real-hardware validation: run a whisper.cpp or Piper adapter end-to-end on Aaron's machine — the true gate for Phase B
+
 ---
 
 ## 📋 REMAINING TASKS

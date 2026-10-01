@@ -231,6 +231,23 @@ def main() -> int:
     except Exception as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1
+    # Phase B: external (subprocess) providers are declared in the config
+    # file — the trust boundary. They join the slot registry before
+    # validation so `stt.provider: <external-name>` etc. resolve.
+    try:
+        from echo_node.adapters import (
+            ExternalProviderError,
+            register_external_providers,
+        )
+        ext_names = register_external_providers(config)
+    except ExternalProviderError as exc:
+        print(f"[error] external_providers: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"[error] external provider registration failed: {exc}", file=sys.stderr)
+        return 1
+    if ext_names:
+        print(f"[config] external providers registered: {', '.join(ext_names)}", flush=True)
     try:
         errors = validate_config(config)
     except Exception as exc:

@@ -31,6 +31,10 @@ class ProviderInfo:
     capabilities: Capability
     experimental: bool = False
     last_validation: ValidationResult | None = None
+    # True for providers declared in config.yaml's `external_providers:`
+    # (Phase B subprocess adapters). The settings UI marks these so users
+    # can tell them apart from built-ins.
+    external: bool = False
     # Optional override for cls.validate (used when one class is
     # registered under several names with different probes, e.g. alsa
     # vs sounddevice sharing MicStream).
@@ -68,6 +72,7 @@ class ProviderRegistry:
         provider_cls: type,
         *,
         experimental: bool = False,
+        external: bool = False,
         capabilities: Capability | None = None,
         validate_fn: Callable[[dict[str, Any] | None], ValidationResult] | None = None,
     ) -> ProviderInfo:
@@ -77,6 +82,7 @@ class ProviderRegistry:
             provider_cls=provider_cls,
             capabilities=capabilities or provider_cls.capabilities(),
             experimental=experimental,
+            external=external,
             validate_fn=validate_fn,
         )
         self._providers[(slot, name)] = info

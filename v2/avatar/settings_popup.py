@@ -44,20 +44,23 @@ PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 PROFILES_DIR.mkdir(exist_ok=True)
 
 
-def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[str]:
+def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[str, str]]:
     """Dropdown options from the slot registry: validated providers only.
 
-    Falls back to the hardcoded list if the registry can't be consulted
-    (e.g. echo_node not importable in this context).
+    Returns ``(config_key, display_label)`` pairs; external (subprocess)
+    providers get an " (external)" suffix on the label so users can tell
+    them apart from built-ins. Falls back to the hardcoded list if the
+    registry can't be consulted (e.g. echo_node not importable here).
     """
     try:
         from echo_node.slots import SlotType
         from echo_node.slots.registry import get_registry
         slot = SlotType(slot_name)
-        names = [i.name for i in get_registry().working(slot)]
-        return names or fallback
+        pairs = [(i.name, i.name + (" (external)" if i.external else ""))
+                 for i in get_registry().working(slot)]
+        return pairs or [(n, n) for n in fallback]
     except Exception:
-        return fallback
+        return [(n, n) for n in fallback]
 
 
 # ── Styling ──────────────────────────────────────────────────────
@@ -294,10 +297,11 @@ class SettingsPopup(QFrame):
         gb2 = QGroupBox("STT")
         f2 = QFormLayout(gb2); f2.setSpacing(3); f2.setContentsMargins(8, 16, 8, 8)
         self._stt_provider = QComboBox()
-        for p in _registry_provider_names("stt", ["faster-whisper", "parakeet"]):
-            self._stt_provider.addItem(p)
-        self._stt_provider.currentTextChanged.connect(
-            lambda v: self._emit("config", section="stt", key="provider", value=v))
+        for key, label in _registry_provider_names("stt", ["faster-whisper", "parakeet"]):
+            self._stt_provider.addItem(label, key)
+        self._stt_provider.currentIndexChanged.connect(
+            lambda _i: self._emit("config", section="stt", key="provider",
+                                 value=self._stt_provider.currentData()))
         f2.addRow("Provider:", self._stt_provider)
         self._stt_model = QComboBox()
         for m in ["tiny", "base", "small", "medium", "large-v3"]:
@@ -312,10 +316,11 @@ class SettingsPopup(QFrame):
         gb3 = QGroupBox("TTS")
         f3 = QFormLayout(gb3); f3.setSpacing(3); f3.setContentsMargins(8, 16, 8, 8)
         self._tts_provider = QComboBox()
-        for p in _registry_provider_names("tts", ["kokoro", "dots", "espeak-ng"]):
-            self._tts_provider.addItem(p)
-        self._tts_provider.currentTextChanged.connect(
-            lambda v: self._emit("config", section="tts", key="provider", value=v))
+        for key, label in _registry_provider_names("tts", ["kokoro", "dots", "espeak-ng"]):
+            self._tts_provider.addItem(label, key)
+        self._tts_provider.currentIndexChanged.connect(
+            lambda _i: self._emit("config", section="tts", key="provider",
+                                 value=self._tts_provider.currentData()))
         f3.addRow("Provider:", self._tts_provider)
         self._tts_voice = QLineEdit("af_heart")
         self._tts_voice.textChanged.connect(
@@ -455,11 +460,11 @@ class SettingsPopup(QFrame):
                 "api_key": self._llm_key.text(),
             },
             "stt": {
-                "provider": self._stt_provider.currentText(),
+                "provider": self._stt_provider.currentData() or self._stt_provider.currentText(),
                 "model": self._stt_model.currentText(),
             },
             "tts": {
-                "provider": self._tts_provider.currentText(),
+                "provider": self._tts_provider.currentData() or self._tts_provider.currentText(),
                 "voice": self._tts_voice.text(),
             },
             "assistant": {"wake_phrase": self._wake_phrase.text()},
@@ -510,14 +515,18 @@ class SettingsPopup(QFrame):
                 if "api_key" in data: self._llm_key.setText(data["api_key"])
             elif sec == "stt":
                 if "provider" in data:
-                    i = self._stt_provider.findText(data["provider"])
+                    i = self._stt_provider.findData(data["provider"])
+                    if i < 0:
+                        i = self._stt_provider.findText(data["provider"])
                     if i >= 0: self._stt_provider.setCurrentIndex(i)
                 if "model" in data:
                     i = self._stt_model.findText(data["model"])
                     if i >= 0: self._stt_model.setCurrentIndex(i)
             elif sec == "tts":
                 if "provider" in data:
-                    i = self._tts_provider.findText(data["provider"])
+                    i = self._tts_provider.findData(data["provider"])
+                    if i < 0:
+                        i = self._tts_provider.findText(data["provider"])
                     if i >= 0: self._tts_provider.setCurrentIndex(i)
                 if "voice" in data: self._tts_voice.setText(data["voice"])
             elif sec == "assistant":

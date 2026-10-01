@@ -860,7 +860,9 @@ def _build_backend_options() -> list[tuple[str, str, str]]:
     Only providers that pass validation appear (experimental ones are
     excluded unless ECHO_INCLUDE_EXPERIMENTAL=1). Falls back to every
     registered non-experimental backend if validation finds nothing, so
-    the popup never renders an empty dropdown.
+    the popup never renders an empty dropdown. External (subprocess)
+    providers get an " (external)" suffix on the label; the config key
+    (userData) is unchanged.
     """
     from echo_node.slots import SlotType
     from echo_node.slots.registry import get_registry
@@ -868,7 +870,9 @@ def _build_backend_options() -> list[tuple[str, str, str]]:
     if not working:
         working = [i for i in get_registry().all_providers(SlotType.AGENT_BACKEND)
                    if not i.experimental]
-    return [(i.name, i.provider_cls.name, _BACKEND_GLYPHS.get(i.name, ""))
+    return [(i.name,
+             (i.provider_cls.name or i.name) + (" (external)" if i.external else ""),
+             _BACKEND_GLYPHS.get(i.name, ""))
             for i in working]
 
 
