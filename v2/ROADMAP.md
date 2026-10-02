@@ -151,9 +151,11 @@ VRAM on the 4050, Nemotron-3.5-ASR license, sherpa-onnx KWS model license.
       SWIG/meson build-from-source bindings and speexdsp's older MDF).
       Wraps `MicStream`'s capture path; a far-end ring buffer fed by
       `feed_far_end()` supplies the speaker reference. Honest validator
-      notes true full-duplex AEC needs hardware validation. Documented
-      gap: nothing in the pipeline calls `feed_far_end()` yet (speaker →
-      reference wiring is follow-up work).
+      notes true full-duplex AEC needs hardware validation. Wiring is
+      done: the orchestrator resolves the audio_io provider through the
+      registry (`audio.provider`, defaulting to `audio.backend`) and
+      passes `feed_far_end` to `InterruptibleSpeaker` as
+      `far_end_callback` when `aec-webrtc` is active.
     - (c) **TTS tiers** — `Qwen3TTS` (`tts/qwen3-tts`, Qwen3-TTS-0.6B,
       `qwen_tts.Qwen3TTSModel`, streaming) and `VoxCPMTTS` (`tts/voxcpn`,
       VoxCPM-0.5B, `voxcpm.VoxCPM`) in `components/tts.py`, following the

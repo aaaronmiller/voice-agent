@@ -23,11 +23,13 @@ assistant:
 
 audio:
   backend: alsa
-  # Phase C: WebRTC AEC3 mic capture is registered as audio_io/aec-webrtc
-  # (pip install pywebrtc-audio; experimental, ECHO_INCLUDE_EXPERIMENTAL=1),
-  # but the orchestrator still constructs MicStream directly — full
-  # AecAudioIO wiring (incl. feed_far_end() from the playback path) is
-  # follow-up work, so there is no backend: value for it yet.
+  # Optional slot-provider override. When set, the audio_io provider is
+  # resolved through the registry instead of the backend above:
+  #   provider: aec-webrtc   # WebRTC AEC3 mic capture (pip install pywebrtc-audio;
+  #                          # experimental, ECHO_INCLUDE_EXPERIMENTAL=1).
+  # When aec-webrtc is active, the orchestrator feeds each played sentence
+  # into its far-end reference automatically. Omit (or leave unset) for the
+  # historical behaviour: MicStream honouring `backend`.
   sample_rate: 16000
   chunk_size: 1280
   arecord_device: default

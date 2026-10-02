@@ -33,13 +33,15 @@ capture path. It keeps a far-end ring buffer — the *reference* signal
 feeds via :meth:`feed_far_end`. ``read()`` aligns far-end samples with
 each mic chunk and runs AEC3, returning echo-cleaned audio.
 
-Wiring gap (documented, not hidden): nothing in the pipeline currently
-calls ``feed_far_end`` — InterruptibleSpeaker plays WAVs via aplay /
-sounddevice and does not hand the rendered samples back. Full-duplex
-wiring (speaker → feed_far_end) is Phase-C follow-up work; until then
-the provider reports honestly and AEC runs on zero-padded reference
-(which is just the mic signal — no worse than no AEC, and validate()
-says so).
+Wiring: the orchestrator (``echo_node/pipeline/orchestrator.py``) selects
+the audio_io provider via ``create_audio_io`` (``audio.provider`` in
+config.yaml, defaulting to the ``audio.backend`` behaviour) and, when the
+active provider exposes ``feed_far_end``, passes it to
+``InterruptibleSpeaker`` as ``far_end_callback``. The speaker feeds each
+sentence WAV's PCM (resampled to the mic rate) at playback start, so the
+reference buffer tracks what the speakers are actually emitting. Alignment
+is approximate — AEC3 absorbs modest delay via ``aec_stream_delay_ms`` —
+but it is a real far-end signal, not zero-padding.
 """
 
 from __future__ import annotations
@@ -58,6 +60,53 @@ from echo_node.slots.validation import (
     missing_result,
     ok_result,
 )
+
+
+def read_wav_mono16(path: str | Path, target_sr: int) -> np.ndarray:
+    """Read a WAV file as mono int16 at *target_sr* (linear resample).
+
+    Uses ``soundfile`` when importable (handles float WAVs), otherwise the
+    stdlib ``wave`` module (PCM only). Multi-channel input is averaged to
+    mono. Raises a clear error when the format can't be read.
+    """
+    data: np.ndarray
+    src_sr: int
+    try:
+        import soundfile as sf
+        raw, src_sr = sf.read(str(path), dtype="float32", always_2d=True)
+        data = np.asarray(raw, dtype=np.float32)
+        data = data.mean(axis=1)  # stereo → mono
+    except ImportError:
+        import wave
+        try:
+            with wave.open(str(path), "rb") as wf:
+                nchan = wf.getnchannels()
+                src_sr = wf.getframerate()
+                sampwidth = wf.getsampwidth()
+                nframes = wf.getnframes()
+                frames = wf.readframes(nframes)
+        except (wave.Error, EOFError, OSError) as exc:
+            raise ValueError(f"cannot read wav {path}: {exc}") from exc
+        if sampwidth == 1:
+            # 8-bit PCM is unsigned with 128 bias.
+            data = (np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+                    - 128.0) / 128.0
+        elif sampwidth == 2:
+            data = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        else:
+            raise ValueError(
+                f"cannot read wav {path}: {sampwidth * 8}-bit PCM needs "
+                "soundfile (pip install soundfile)")
+        if nchan > 1:
+            data = data.reshape(-1, nchan).mean(axis=1)
+    if src_sr != target_sr and data.size:
+        # Linear resample — good enough for an echo reference signal.
+        src_t = np.linspace(0.0, 1.0, data.size, endpoint=False)
+        dst_n = int(round(data.size * target_sr / src_sr))
+        dst_t = np.linspace(0.0, 1.0, dst_n, endpoint=False)
+        data = np.interp(dst_t, src_t, data).astype(np.float32)
+    pcm = np.clip(data * 32768.0, -32768, 32767).astype(np.int16)
+    return pcm.ravel()
 
 
 class AecAudioIO(AudioIO):
@@ -104,8 +153,8 @@ class AecAudioIO(AudioIO):
             license="BSD-3-Clause",  # WebRTC APM; pywebrtc-audio is MIT
             network=False,
             notes=("WebRTC AEC3 echo cancellation around MicStream capture; "
-                   "needs feed_far_end() wired to the playback path for real "
-                   "full-duplex (currently a documented gap); requires "
+                   "the orchestrator feeds each played sentence to "
+                   "feed_far_end() when this provider is active; requires "
                    "hardware validation — echo removal cannot be proven on "
                    "a VM with no mic/speakers"),
         )
@@ -125,7 +174,9 @@ class AecAudioIO(AudioIO):
             "full-duplex echo removal needs hardware validation (mic + "
             "speakers on the target machine)",
             {"version": ver, "needs_hardware_validation": True,
-             "far_end_wired": False})
+             "far_end_wiring": "orchestrator passes feed_far_end to the "
+                               "speaker when aec-webrtc is the active "
+                               "audio_io provider"})
 
     # ── AudioIO contract ───────────────────────────────────────────
 
@@ -154,9 +205,11 @@ class AecAudioIO(AudioIO):
         """Hand the playback side's rendered audio back as AEC reference.
 
         *samples* should be mono int16 at ``config.sample_rate`` — exactly
-        what was sent to the speakers. The pipeline does not call this
-        yet (see module docstring); until it does, ``read()`` runs AEC
-        against zero-padded reference.
+        what was sent to the speakers. The orchestrator wires this to the
+        speaker's ``far_end_callback`` when this provider is active, so
+        each played sentence lands in the reference buffer at playback
+        start; until the first playback, ``read()`` runs AEC against
+        zero-padded reference.
         """
         chunk = np.asarray(samples, dtype=np.int16).ravel()
         self._far.append(chunk)

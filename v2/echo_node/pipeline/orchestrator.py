@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from echo_node.backends import AgentBackend, REGISTRY, create_backend
-from echo_node.components.audio import AudioConfig, InterruptibleSpeaker, MicStream
+from echo_node.components.audio import (
+    AudioConfig, InterruptibleSpeaker, MicStream, create_audio_io,
+)
 from echo_node.components.stt import create_stt
 from echo_node.components.vad import OpenWakeWordVad, Recorder
 from echo_node.components.wake import WakeDetector
@@ -38,7 +40,10 @@ class Assistant:
         # Needed to persist external_provider_save/remove back to the file.
         self.config_path = Path(config_path) if config_path else None
         self.audio_config = AudioConfig(**config["audio"])
-        self.mic = MicStream(self.audio_config)
+        # Audio I/O (provider resolved through the slot registry; unknown
+        # names fall back to MicStream honouring audio.backend — same as
+        # the old hard-coded construction)
+        self.mic = create_audio_io(config["audio"])
         self.wake = WakeDetector(config.get("wake_word", {}))
         self.vad = OpenWakeWordVad(config.get("vad", {}))
         self.recorder = Recorder(self.mic, self.vad, config.get("vad", {}))
@@ -75,12 +80,20 @@ class Assistant:
         self.speech_verbose = bool(config.get("speech_format", {}).get("verbose", False))
 
         # Speaker (TTS + barge-in, uses hotkey for Enter-to-interrupt)
+        # AEC far-end wiring: when the capture path is the AEC wrapper,
+        # feed it the audio we play so it has a real echo reference.
+        # Otherwise the speaker's far-end tap stays disabled.
+        _far_end = getattr(self.mic, "feed_far_end", None)
+        if callable(_far_end):
+            print("[aec] far-end reference wired: playback → feed_far_end",
+                  flush=True)
         self.speaker = InterruptibleSpeaker(
             self.audio_config, self.vad,
             config.get("barge_in", {}),
             config.get("tts", {}),
             avatar=self.avatar,
             hotkey=self.hotkey,
+            far_end_callback=_far_end if callable(_far_end) else None,
         )
 
         # Wire debug data to avatar overlay
@@ -260,15 +273,40 @@ class Assistant:
             return None, f"cannot read {self.config_path}: {exc}"
         return cfg, None
 
-    def _write_config_file(self, cfg: dict[str, Any]) -> str | None:
-        """Write back config.yaml, preserving all other keys. Returns error or None."""
+    def _write_config_file(self, cfg: dict[str, Any],
+                           entries: list[Any]) -> str | None:
+        """Write back config.yaml's ``external_providers:`` surgically.
+
+        Only the ``external_providers:`` block is replaced (or appended when
+        absent); comments, blank lines, key order, and everything else in
+        the file are preserved byte-for-byte. Falls back to a full
+        ``yaml.safe_dump`` rewrite — which drops comments — only when the
+        existing layout can't be patched cleanly. Returns error or None.
+        """
         import yaml
+        from echo_node.adapters.ui_helpers import replace_top_level_block
         assert self.config_path is not None
         try:
-            self.config_path.write_text(
-                yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False,
-                               allow_unicode=True),
-                encoding="utf-8")
+            raw = self.config_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            return f"cannot read {self.config_path}: {exc}"
+        if entries:
+            dumped = yaml.safe_dump(entries, default_flow_style=False,
+                                    sort_keys=False, allow_unicode=True)
+            new_block = (["external_providers:\n"] +
+                         [f"  {ln}\n" for ln in dumped.splitlines()])
+        else:
+            new_block = ["external_providers: []\n"]
+        new_raw = replace_top_level_block(raw, "external_providers", new_block)
+        if new_raw is None:
+            # Layout too odd to patch — full rewrite, comments lost.
+            print("[settings] external_providers: block layout unclear, "
+                  "rewriting config file (comments will be dropped)",
+                  flush=True)
+            new_raw = yaml.safe_dump(cfg, default_flow_style=False,
+                                     sort_keys=False, allow_unicode=True)
+        try:
+            self.config_path.write_text(new_raw, encoding="utf-8")
         except Exception as exc:
             return f"cannot write {self.config_path}: {exc}"
         return None
@@ -329,7 +367,7 @@ class Assistant:
                 break
         if not replaced:
             entries.append(record)
-        err = self._write_config_file(cfg)
+        err = self._write_config_file(cfg, entries)
         if err is not None:
             self._external_result(False, f"save rejected: {err}", name)
             return
@@ -382,7 +420,7 @@ class Assistant:
                        f"{self.config_path.name}", name)
             return
         del entries[idx]
-        err = self._write_config_file(cfg)
+        err = self._write_config_file(cfg, entries)
         if err is not None:
             self._external_result(False, f"remove rejected: {err}", name)
             return

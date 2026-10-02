@@ -9,11 +9,15 @@ are no executable paths involved.
 
 The ``wyoming`` PyPI package is deliberately NOT used: it was not
 installed on the build machine, and a stdlib-only client keeps the
-host dependency-free. Framing and event names were verified against
-the upstream source (rhasspy/wyoming, now OHF-Voice/wyoming, main
-branch, 2026-10-01) — ``wyoming/event.py`` (framing), ``asr.py``,
-``tts.py``, ``wake.py``, ``audio.py``. Where the protocol leaves room
-for doubt it is called out in comments.
+host dependency-free. Framing and event names were verified twice:
+against the upstream source at 2026-10-01 (rhasspy/wyoming, now
+OHF-Voice/wyoming, main branch — ``wyoming/event.py`` (framing),
+``asr.py``, ``tts.py``, ``wake.py``, ``audio.py``) and again against the
+``wyoming`` 1.10.2 wheel (event framing in ``event.py``, ``error`` event
+shape in ``error.py``, ``detect``/``detection``/``not-detected`` in
+``wake.py``). Where the protocol leaves room for doubt it is called out
+in comments. No live-server round-trip has been done yet — that needs
+real Wyoming servers on the target machine.
 """
 
 from __future__ import annotations
@@ -76,9 +80,9 @@ class WyomingConnectionError(WyomingError):
 class WyomingProtocolError(WyomingError):
     """The server spoke something that is not the Wyoming protocol,
     closed the connection mid-request, or answered with an `error`
-    event. (The `error` event itself is wyoming/error.py convention —
-    type "error", data {"text", "code"} — handled but not re-verified
-    against a live server in this session.)"""
+    event. (The `error` event shape — type "error", data {"text",
+    "code"} — was verified against wyoming 1.10.2's error.py; a
+    live-server round-trip is still untested.)"""
 
 
 # ── Framing ─────────────────────────────────────────────────────────

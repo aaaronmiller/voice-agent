@@ -224,17 +224,45 @@ def write_csv(report: dict[str, Any], csv_path: Path) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="A/B test STT providers on 16 kHz mono PCM16 WAV files.")
-    parser.add_argument("--a", help="First STT provider (registry name).")
-    parser.add_argument("--b", help="Second STT provider (registry name).")
-    parser.add_argument("--c", default=None, help="Optional third STT provider.")
+        description=(
+            "A/B test STT providers: transcribe the same WAV file(s) with "
+            "two or three providers and compare transcripts, per-file "
+            "latency, and errors. Each provider runs in-process; a provider "
+            "that fails on a file records the error instead of aborting "
+            "the run."
+        ),
+        epilog=(
+            "examples:\n"
+            "  %(prog)s --list\n"
+            "  %(prog)s --a parakeet --b faster-whisper sample1.wav sample2.wav\n"
+            "  %(prog)s --a parakeet --b faster-whisper --c onnx-asr \\\n"
+            "      --out report.json --csv report.csv *.wav\n"
+            "\n"
+            "WAV files must be 16 kHz mono PCM16 (anything else is rejected\n"
+            "with a clear message); provider names are the registry names\n"
+            "shown by --list (experimental providers need\n"
+            "ECHO_INCLUDE_EXPERIMENTAL=1)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--a", metavar="PROVIDER",
+                        help="First STT provider (registry name, see --list).")
+    parser.add_argument("--b", metavar="PROVIDER",
+                        help="Second STT provider (registry name, see --list).")
+    parser.add_argument("--c", metavar="PROVIDER", default=None,
+                        help="Optional third STT provider (registry name).")
     parser.add_argument("--list", action="store_true",
-                        help="Print available STT providers and exit.")
-    parser.add_argument("--out", default=None,
-                        help="Write the JSON report to this path (default: stdout).")
-    parser.add_argument("--csv", default=None,
-                        help="Also write a CSV report to this path.")
-    parser.add_argument("files", nargs="*", help="WAV files to transcribe.")
+                        help="Print available STT provider names and exit.")
+    parser.add_argument("--out", default=None, metavar="PATH",
+                        help="Write the JSON report to this path "
+                             "(default: stdout). The report holds one entry "
+                             "per (file, provider) with transcript, "
+                             "latency_s, and error fields.")
+    parser.add_argument("--csv", default=None, metavar="PATH",
+                        help="Also write a CSV report to this path "
+                             "(columns: file, provider, latency_s, "
+                             "transcript, error).")
+    parser.add_argument("files", nargs="*", metavar="WAV",
+                        help="WAV files to transcribe (16 kHz mono PCM16).")
     args = parser.parse_args(argv)
     if not args.list:
         if not args.a or not args.b:

@@ -53,6 +53,43 @@ class AudioConfig:
     playback_device: str = "default"
     input_device: str | int | None = None
     output_device: str | int | None = None
+    # Optional slot-provider override (audio.provider in config.yaml).
+    # None/empty means "use backend" — the historical behaviour.
+    provider: str | None = None
+
+
+def create_audio_io(audio_config: dict[str, Any]) -> AudioIO:
+    """Instantiate the configured audio I/O provider.
+
+    ``audio.provider`` selects the registry provider (e.g. ``aec-webrtc``);
+    when absent, the ``audio.backend`` value (``alsa``/``sounddevice``) is
+    used — exactly the old hard-coded ``MicStream`` construction in the
+    orchestrator. Unknown provider names fall back to ``MicStream``.
+    """
+    from echo_node.slots import SlotType
+    from echo_node.slots.registry import get_registry
+    provider = str(audio_config.get("provider")
+                   or audio_config.get("backend", "alsa"))
+    try:
+        cls = get_registry().get(SlotType.AUDIO_IO, provider)
+    except KeyError:
+        print(f"[audio] unknown provider {provider!r}, falling back to MicStream",
+              flush=True)
+        cls = MicStream
+    if cls is MicStream:
+        return cls(AudioConfig(
+            backend=str(audio_config.get("backend", "alsa")),
+            sample_rate=int(audio_config.get("sample_rate", 16000)),
+            chunk_size=int(audio_config.get("chunk_size", 1280)),
+            arecord_device=str(audio_config.get("arecord_device", "default")),
+            playback_device=str(audio_config.get("playback_device", "default")),
+            input_device=audio_config.get("input_device"),
+            output_device=audio_config.get("output_device"),
+            provider=audio_config.get("provider"),
+        ))
+    # Slot providers other than MicStream (e.g. AecAudioIO) accept the raw
+    # audio section dict.
+    return cls(dict(audio_config))
 
 
 # ── Mic stream ──────────────────────────────────────────────────────
@@ -151,10 +188,15 @@ class InterruptibleSpeaker:
         tts_config: dict[str, Any],
         avatar: Any = None,
         hotkey: Any = None,
+        far_end_callback: Callable[[np.ndarray], None] | None = None,
     ):
         self.audio = audio
         self.vad = vad
         self.enabled = bool(config.get("enabled", True))
+        # Far-end reference for echo cancellation: called with the mono
+        # int16 PCM of each played sentence (at audio.sample_rate) as
+        # playback starts. None (the default) disables the tap entirely.
+        self.far_end_callback = far_end_callback
         # Barge-in policy (slot provider): VAD-gated interruption with
         # playback threshold boosting, debounce and hysteresis.
         self.barge_in = VadGatedBargeIn(vad, config)
@@ -283,7 +325,25 @@ class InterruptibleSpeaker:
                            silence_started: float | None, now: float) -> tuple[bool, float | None, float | None]:
         return self.barge_in.check(is_speech, speech_started, silence_started, now)
 
+    def _feed_far_end(self, wav: Path) -> None:
+        """Hand the about-to-play WAV to the AEC far-end reference.
+
+        Reads the file as mono int16 at the mic sample rate and calls
+        ``far_end_callback``. Never raises — a broken tap must not break
+        playback.
+        """
+        if self.far_end_callback is None:
+            return
+        try:
+            from echo_node.components.aec import read_wav_mono16
+            pcm = read_wav_mono16(wav, self.audio.sample_rate)
+            self.far_end_callback(pcm)
+        except Exception as exc:
+            print(f"[aec] far-end tap failed ({exc}); continuing without it",
+                  flush=True)
+
     def _play_wav(self, wav: Path, mic: MicStream | None) -> bool:
+        self._feed_far_end(wav)
         if self.audio.backend == "sounddevice":
             return self._play_wav_sounddevice(wav, mic)
         if shutil.which("aplay") is None:

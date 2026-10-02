@@ -194,8 +194,9 @@ Conformance: `v2/echo_node/tests/test_phase_c.py` — 40/40 pass on a bare VM;
 
 ### Open / needs Aaron's hardware
 - [ ] Silero v6: verify windowing + thresholds on real mic audio (16% error reduction claim).
-- [ ] AEC3: needs mic + speakers + a room. Wire `feed_far_end()` from the playback
-  path (`InterruptibleSpeaker._play_wav*`) — currently nothing feeds the reference.
+- [ ] AEC3: needs mic + speakers + a room. `feed_far_end()` is now wired
+  (orchestrator → `InterruptibleSpeaker.far_end_callback` when `audio_io`
+  is `aec-webrtc`); validate echo removal on real hardware.
 - [ ] Qwen3-TTS 0.6B: verify quantized path fits 6GB VRAM; verify `generate_custom_voice`
   kwargs and 97ms first-packet claim; test Base voice-clone variant.
 - [ ] VoxCPM: confirm the 0.5B checkpoint HF id; verify `generate()` kwargs and 16kHz output.

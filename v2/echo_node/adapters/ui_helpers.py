@@ -95,10 +95,100 @@ def summarize_command(argv: list[str] | tuple[str, ...]) -> str:
     return text[:69] + "..."
 
 
+_TOP_LEVEL_KEY_RE = re.compile(r"^([A-Za-z0-9_][\w.\-]*)\s*:")
+
+
+def replace_top_level_block(
+    raw_text: str, key: str, new_block: list[str]
+) -> str | None:
+    """Surgically replace (or append) a top-level YAML block, textually.
+
+    *new_block* is the replacement block *including* its ``key:`` header
+    line (each line should end with ``"\\n"``). Everything outside the
+    block — comments, blank lines, other keys, their order — is preserved
+    byte-for-byte.
+
+    Returns the new file text, or ``None`` when the existing layout can't
+    be handled cleanly; the caller should then fall back to a full
+    ``yaml.safe_dump`` rewrite. ``None`` triggers:
+
+    - the key appears indented (nested) anywhere — replacing only one
+      occurrence could silently duplicate it;
+    - the key appears more than once at the top level;
+    - the block's extent can't be determined (a column-0 line inside the
+      block that isn't another top-level key, ``---`` or ``...`` — e.g.
+      a literal block scalar with unindented content).
+
+    This is stdlib-only on purpose: no YAML parser is needed because we
+    never interpret the block, we only swap its line span.
+    """
+    if not key or not _TOP_LEVEL_KEY_RE.fullmatch(key + ":"):
+        return None
+    header_re = re.compile(r"^" + re.escape(key) + r"\s*:(?=[\s#]|$)")
+    nested_re = re.compile(r"^[ \t]+" + re.escape(key) + r"\s*:(?=[\s#]|$)")
+    lines = raw_text.splitlines(keepends=True)
+
+    def is_header(line: str) -> bool:
+        return header_re.match(line) is not None
+
+    top_hits: list[int] = []
+    for i, line in enumerate(lines):
+        if is_header(line):
+            top_hits.append(i)
+        elif nested_re.match(line):
+            return None  # nested occurrence — ambiguous, bail out
+    if len(top_hits) > 1:
+        return None  # duplicate top-level keys — bail out
+
+    block_lines = [ln if ln.endswith("\n") else ln + "\n" for ln in new_block]
+    if not block_lines or not is_header(block_lines[0]):
+        return None  # caller bug: replacement must carry the header
+
+    if not top_hits:
+        # Absent: append at end of file.
+        out = list(lines)
+        if out and not out[-1].endswith("\n"):
+            out[-1] = out[-1] + "\n"
+        out.extend(block_lines)
+        return "".join(out)
+
+    start = top_hits[0]
+    end = len(lines)
+    pending_comment: int | None = None
+    i = start + 1
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        if line[0] in (" ", "\t"):
+            pending_comment = None  # indented content: comments so far are inside
+            i += 1
+            continue
+        if stripped.startswith("#"):
+            # Tentatively absorbed: if a top-level key / --- / ... / EOF
+            # follows with no more indented content, the comment run
+            # attaches to what follows and must be preserved.
+            if pending_comment is None:
+                pending_comment = i
+            i += 1
+            continue
+        if stripped in ("---", "...") or _TOP_LEVEL_KEY_RE.match(line):
+            end = pending_comment if pending_comment is not None else i
+            break
+        return None  # column-0 content that isn't a new block — bail out
+    else:
+        if pending_comment is not None:
+            end = pending_comment  # trailing comment run at EOF is preserved
+    return "".join(lines[:start] + block_lines + lines[end:])
+
+
 __all__ = [
     "validate_name",
     "parse_args_text",
     "format_args_text",
     "build_entry_dict",
     "summarize_command",
+    "replace_top_level_block",
 ]
