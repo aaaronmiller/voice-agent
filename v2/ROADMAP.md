@@ -219,6 +219,25 @@ VRAM on the 4050, Nemotron-3.5-ASR license, sherpa-onnx KWS model license.
     wyoming-piper, wyoming-openwakeword on real hardware. Still open in
     Phase D: the avatar slot and capability-intersection UI filtering.
 
+    Post-D additions (2026-10-01, on main):
+    - **Streaming TTS playback** — `TTSProvider.generate_stream()` is now an
+      optional slot-ABC method; `InterruptibleSpeaker` plays chunks as they
+      arrive (aplay raw-float stdin / sounddevice OutputStream) with barge-in
+      polled between chunks, blocking fallback, and `t_tts_first_chunk` as
+      first-*audio* latency. WyomingTTS got a real `generate_stream` (it
+      already received audio-chunk events); Qwen3TTS's `streaming=True` was
+      corrected to `False` (upstream qwen_tts is offline-only). Avatar
+      lip-sync keeps the blocking path. Suite:
+      `echo_node/tests/test_tts_streaming.py` — 36 checks.
+    - **Capability-aware dropdown tooltips** — STT/TTS/backend dropdowns show
+      a one-line Capability summary (streaming/batch, languages, CPU/GPU,
+      license) above the validation reason in the tooltip; Qt-free
+      `format_capability_summary()` in `adapters/ui_helpers.py`.
+    - **Hardware testing guide** — `docs/HARDWARE_TESTING.md`: ordered
+      checklist (validate_all, per-slot smoke tests, STT A/B, Wyoming
+      round-trips, AEC on/off, subprocess adapters, latency targets,
+      turn-record log locations).
+
 ## 5. Open questions
 
 - Branch strategy for the rework (feature branch off `muse/polish-pass`?).

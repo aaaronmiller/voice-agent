@@ -14,6 +14,8 @@ Barge-in design (2026 best practice, all config-driven via ``barge_in``):
 
 from __future__ import annotations
 
+import itertools
+import os
 import shutil
 import subprocess
 import tempfile
@@ -29,7 +31,7 @@ import numpy as np
 from echo_node.components._common import pop_speakable_chunk, rms_int16, sentence_chunks
 from echo_node.components.barge_in import VadGatedBargeIn
 from echo_node.components.tts import EspeakTTS, create_tts
-from echo_node.slots import AudioIO, Capability
+from echo_node.slots import AudioIO, Capability, TTSProvider
 from echo_node.slots.validation import (
     ValidationResult,
     check_binary,
@@ -243,46 +245,133 @@ class InterruptibleSpeaker:
                 "state": state,
             })
 
+    def _tts_supports_streaming(self) -> bool:
+        """True when the active TTS provider implements ``generate_stream``
+        for real (overridden, not the ABC's synthesize-and-yield-one-chunk
+        default). The override is the ground truth — a provider that merely
+        *advertises* streaming without implementing it stays on the blocking
+        path."""
+        return type(self.tts).generate_stream is not TTSProvider.generate_stream
+
     def speak(self, text: str, mic: MicStream | None = None, turn_rec: Any = None) -> bool:
         interrupted = False
         first_chunk = True
-        for chunk in sentence_chunks(text):
-            wav = Path(tempfile.mkstemp(prefix="echo-node-say-", suffix=".wav")[1])
-            try:
-                if turn_rec and first_chunk:
-                    turn_rec.t_tts_start = time.perf_counter()
-                self.tts.synthesize_to_wav(chunk, wav)
-                if turn_rec and first_chunk:
-                    turn_rec.t_tts_first_chunk = time.perf_counter()
-                if self.avatar is not None:
-                    # Async preload: run Rhubarb in background thread
-                    ready = threading.Event()
-                    preload_result = [False]
-                    def _do_preload():
-                        preload_result[0] = self.avatar.preload(wav)
-                        ready.set()
-                    t = threading.Thread(target=_do_preload, daemon=True)
-                    t.start()
-                    ready.wait(timeout=15)  # cap at 15s so speech isn't blocked forever
-                    if preload_result[0]:
-                        self.avatar.play()
-                try:
-                    if turn_rec and first_chunk:
-                        turn_rec.t_playback_start = time.perf_counter()
-                    interrupted = self._play_wav(wav, mic)
-                    if turn_rec and first_chunk:
-                        turn_rec.t_playback_done = time.perf_counter()
-                finally:
-                    if self.avatar is not None:
-                        self.avatar.stop()
-                if interrupted:
-                    break
-            finally:
-                wav.unlink(missing_ok=True)
+        # Streaming playback needs no avatar: Rhubarb lip-sync requires the
+        # complete utterance WAV for phoneme alignment, which is
+        # fundamentally at odds with playing audio as it is generated —
+        # avatar users keep the exact blocking behavior they have today.
+        allow_stream = self.avatar is None and self._tts_supports_streaming()
+        for sentence in sentence_chunks(text):
+            if allow_stream:
+                outcome, interrupted = self._speak_sentence_streaming(
+                    sentence, mic, turn_rec, first_chunk)
+                if outcome == "fallback":
+                    # Generator failed before any audio played: safe to
+                    # retry this sentence through the blocking path.
+                    interrupted = self._speak_sentence_blocking(
+                        sentence, mic, turn_rec, first_chunk)
+                elif outcome == "disable":
+                    # Generator failed mid-stream; the partial audio stands
+                    # (no replay) and the rest of this speak() call uses
+                    # the blocking path.
+                    allow_stream = False
+            else:
+                interrupted = self._speak_sentence_blocking(
+                    sentence, mic, turn_rec, first_chunk)
+            if interrupted:
+                break
             first_chunk = False
         if turn_rec:
             turn_rec.t_tts_done = time.perf_counter()
         return interrupted
+
+    def _speak_sentence_blocking(self, sentence: str, mic: MicStream | None,
+                                 turn_rec: Any, first_chunk: bool) -> bool:
+        """The historical per-sentence path: synthesize the whole sentence,
+        then play the WAV. Unchanged behavior, including avatar lip-sync."""
+        interrupted = False
+        wav = Path(tempfile.mkstemp(prefix="echo-node-say-", suffix=".wav")[1])
+        try:
+            if turn_rec and first_chunk:
+                turn_rec.t_tts_start = time.perf_counter()
+            self.tts.synthesize_to_wav(sentence, wav)
+            if turn_rec and first_chunk:
+                turn_rec.t_tts_first_chunk = time.perf_counter()
+            if self.avatar is not None:
+                # Async preload: run Rhubarb in background thread
+                ready = threading.Event()
+                preload_result = [False]
+                def _do_preload():
+                    preload_result[0] = self.avatar.preload(wav)
+                    ready.set()
+                t = threading.Thread(target=_do_preload, daemon=True)
+                t.start()
+                ready.wait(timeout=15)  # cap at 15s so speech isn't blocked forever
+                if preload_result[0]:
+                    self.avatar.play()
+            try:
+                if turn_rec and first_chunk:
+                    turn_rec.t_playback_start = time.perf_counter()
+                interrupted = self._play_wav(wav, mic)
+                if turn_rec and first_chunk:
+                    turn_rec.t_playback_done = time.perf_counter()
+            finally:
+                if self.avatar is not None:
+                    self.avatar.stop()
+        finally:
+            wav.unlink(missing_ok=True)
+        return interrupted
+
+    def _speak_sentence_streaming(self, sentence: str, mic: MicStream | None,
+                                  turn_rec: Any,
+                                  first_chunk: bool) -> tuple[str, bool]:
+        """Play one sentence from ``generate_stream()`` chunks as they arrive.
+
+        Returns ``(outcome, interrupted)`` where outcome is ``"ok"``,
+        ``"fallback"`` (generator failed before the first audio chunk —
+        the caller retries this sentence via the blocking path) or
+        ``"disable"`` (generator failed mid-stream; partial audio stands,
+        caller uses blocking for the rest of this ``speak()`` call).
+        Barge-in is polled between chunks, so an interruption never splits
+        a chunk — no partial-chunk glitches.
+        """
+        sample_rate = getattr(self.tts, "sample_rate", None)
+        if not sample_rate:
+            # Can't play chunks without knowing their rate: let the
+            # blocking path handle it (it reads the rate from the WAV).
+            return "fallback", False
+        if turn_rec and first_chunk:
+            turn_rec.t_tts_start = time.perf_counter()
+        try:
+            gen = self.tts.generate_stream(sentence)
+            first_audio = next(iter(gen))
+        except Exception as exc:
+            print(f"[tts] streaming failed before first chunk ({exc}); "
+                  f"falling back to blocking", flush=True)
+            return "fallback", False
+        if turn_rec and first_chunk:
+            # Honest metric: the first *audio* chunk, not the first token.
+            turn_rec.t_tts_first_chunk = time.perf_counter()
+        chunks = itertools.chain([first_audio], gen)
+        try:
+            if self.audio.backend == "sounddevice":
+                interrupted = self._play_chunks_sounddevice(
+                    chunks, int(sample_rate), mic, turn_rec, first_chunk)
+            else:
+                interrupted = self._play_chunks_aplay(
+                    chunks, int(sample_rate), mic, turn_rec, first_chunk)
+        except Exception as exc:
+            print(f"[tts] streaming failed mid-sentence ({exc}); "
+                  f"continuing in blocking mode", flush=True)
+            return "disable", False
+        finally:
+            close = getattr(gen, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+        return "ok", interrupted
 
     def speak_stream(self, chunks: Iterable[str], mic: MicStream | None = None, turn_rec: Any = None) -> tuple[bool, str]:
         interrupted = False
@@ -422,4 +511,158 @@ class InterruptibleSpeaker:
                     time.sleep(0.03)
         finally:
             sd.stop()
+        return False
+
+    # ── Streaming playback (generate_stream chunks) ────────────────
+
+    def _check_bargein_tick(self, mic: MicStream,
+                            started: float, tick: list) -> bool:
+        """One barge-in poll during chunked playback.
+
+        *tick* is a ``[speech_started, silence_started]`` pair carried
+        across calls. Returns True when playback must stop.
+        """
+        samples = mic.read()
+        self._send_debug(self.vad.score(samples), rms_int16(samples), "playing")
+        triggered, ss, sl = self._bargein_triggered(
+            self._is_bargein_speech(samples, started, self.playback_start_grace_s,
+                                    self._orig_threshold, self._orig_rms_floor),
+            tick[0], tick[1], time.monotonic(),
+        )
+        tick[0], tick[1] = ss, sl
+        return triggered
+
+    def _tap_streamed_far_end(self, played: list[np.ndarray],
+                              sample_rate: int) -> None:
+        """Hand actually-played streamed PCM to the AEC far-end reference.
+
+        Only chunks that reached the device are tapped (what was heard).
+        Reuses :meth:`_feed_far_end` via a temp WAV, so resampling and the
+        never-raise guarantee are shared with the blocking path. Stdlib
+        ``wave`` only — no soundfile dependency.
+        """
+        if self.far_end_callback is None or not played:
+            return
+        import wave
+        try:
+            pcm = np.concatenate(
+                [np.ascontiguousarray(c, dtype=np.float32).ravel()
+                 for c in played])
+            pcm16 = np.clip(pcm * 32768.0, -32768, 32767).astype(np.int16)
+            fd, name = tempfile.mkstemp(prefix="echo-node-stream-", suffix=".wav")
+            os.close(fd)
+            try:
+                with wave.open(name, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(int(sample_rate))
+                    wf.writeframes(pcm16.tobytes())
+                self._feed_far_end(Path(name))
+            finally:
+                Path(name).unlink(missing_ok=True)
+        except Exception as exc:
+            print(f"[aec] streamed far-end tap failed ({exc}); continuing",
+                  flush=True)
+
+    def _play_chunks_aplay(self, chunks: Iterable[np.ndarray],
+                           sample_rate: int, mic: MicStream | None,
+                           turn_rec: Any, first_chunk: bool) -> bool:
+        """Stream float32 mono chunks to aplay's stdin as they arrive.
+
+        Barge-in (and hotkey) are polled *between* chunks, so an
+        interruption never splits a chunk. Generator exceptions propagate
+        to the caller, which downgrades to the blocking path.
+        """
+        if shutil.which("aplay") is None:
+            raise RuntimeError("aplay is not installed.")
+        command = ["aplay", "-q", "-t", "raw", "-f", "FLOAT_LE", "-c", "1",
+                   "-r", str(int(sample_rate)), "-D", self.audio.playback_device,
+                   "-"]
+        proc = subprocess.Popen(command, stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        started = time.monotonic()
+        tick: list = [None, None]
+        played: list[np.ndarray] = []
+        try:
+            first = True
+            assert proc.stdin is not None
+            for chunk in chunks:
+                arr = np.ascontiguousarray(chunk, dtype=np.float32).ravel()
+                if arr.size == 0:
+                    continue
+                if proc.poll() is not None:
+                    raise RuntimeError("aplay exited unexpectedly mid-stream")
+                if self.hotkey and self.hotkey.interrupt_requested():
+                    self.hotkey.triggered()
+                    print("[hotkey] playback interrupted", flush=True)
+                    return True
+                if (self.enabled and mic is not None
+                        and time.monotonic() - started >= self.min_playback_age_seconds
+                        and self._check_bargein_tick(mic, started, tick)):
+                    print("[barge-in] playback interrupted", flush=True)
+                    return True
+                if turn_rec and first_chunk and first:
+                    turn_rec.t_playback_start = time.perf_counter()
+                try:
+                    proc.stdin.write(arr.tobytes())
+                    proc.stdin.flush()
+                except BrokenPipeError as exc:
+                    raise RuntimeError("aplay stdin closed unexpectedly") from exc
+                played.append(arr)
+                first = False
+            proc.stdin.close()
+            proc.wait(timeout=5)
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            self._tap_streamed_far_end(played, sample_rate)
+        if turn_rec and first_chunk:
+            turn_rec.t_playback_done = time.perf_counter()
+        return False
+
+    def _play_chunks_sounddevice(self, chunks: Iterable[np.ndarray],
+                                 sample_rate: int, mic: MicStream | None,
+                                 turn_rec: Any, first_chunk: bool) -> bool:
+        """Stream float32 mono chunks to a sounddevice OutputStream."""
+        import sounddevice as sd
+        stream = sd.OutputStream(samplerate=int(sample_rate), channels=1,
+                                 dtype="float32",
+                                 device=self.audio.output_device)
+        started = time.monotonic()
+        tick: list = [None, None]
+        played: list[np.ndarray] = []
+        stream.start()
+        try:
+            first = True
+            for chunk in chunks:
+                arr = np.ascontiguousarray(chunk, dtype=np.float32).ravel()
+                if arr.size == 0:
+                    continue
+                if self.hotkey and self.hotkey.interrupt_requested():
+                    self.hotkey.triggered()
+                    print("[hotkey] playback interrupted", flush=True)
+                    return True
+                if (self.enabled and mic is not None
+                        and time.monotonic() - started >= self.min_playback_age_seconds
+                        and self._check_bargein_tick(mic, started, tick)):
+                    print("[barge-in] playback interrupted", flush=True)
+                    return True
+                if turn_rec and first_chunk and first:
+                    turn_rec.t_playback_start = time.perf_counter()
+                stream.write(arr)
+                played.append(arr)
+                first = False
+        finally:
+            try:
+                stream.stop()
+            finally:
+                stream.close()
+            self._tap_streamed_far_end(played, sample_rate)
+        if turn_rec and first_chunk:
+            turn_rec.t_playback_done = time.perf_counter()
         return False

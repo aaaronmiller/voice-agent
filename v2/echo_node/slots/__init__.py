@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import enum
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,55 @@ class TTSProvider(ABC):
     @abstractmethod
     def synthesize_to_wav(self, text: str, path: Path) -> Path:
         ...
+
+    def generate_stream(self, text: str) -> Iterator[np.ndarray]:
+        """Yield float32 mono audio chunks as they are produced.
+
+        Optional: the default implementation synthesizes the whole
+        utterance and yields it as a single chunk, so providers without
+        true streaming keep working unchanged. Providers advertising
+        ``Capability(streaming=True)`` should override this for real —
+        the pipeline only takes the streaming playback path when the
+        method is actually overridden.
+        """
+        import os
+        import tempfile
+        fd, name = tempfile.mkstemp(prefix="echo-node-tts-stream-", suffix=".wav")
+        os.close(fd)
+        path = Path(name)
+        try:
+            self.synthesize_to_wav(text, path)
+            try:
+                import soundfile as sf
+                data, _sr = sf.read(str(path), dtype="float32", always_2d=True)
+                yield np.asarray(data[:, 0], dtype=np.float32)
+                return
+            except ImportError:
+                pass
+            import wave
+            with wave.open(str(path), "rb") as wf:
+                nchan = wf.getnchannels()
+                sampwidth = wf.getsampwidth()
+                if sampwidth != 2:
+                    raise RuntimeError(
+                        "streaming fallback needs soundfile for non-PCM16 WAV "
+                        "(pip install soundfile)")
+                raw = wf.readframes(wf.getnframes())
+            chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            if nchan > 1:
+                chunk = chunk.reshape(-1, nchan).mean(axis=1).astype(np.float32)
+            yield chunk
+        finally:
+            path.unlink(missing_ok=True)
+
+    @property
+    def sample_rate(self) -> int | None:
+        """Native output sample rate in Hz, or None when unknown.
+
+        The streaming playback path needs this; providers with a real
+        ``generate_stream`` should expose it.
+        """
+        return None
 
     @classmethod
     def capabilities(cls) -> Capability:

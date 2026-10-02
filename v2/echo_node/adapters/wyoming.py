@@ -480,12 +480,19 @@ class WyomingTTS(WyomingAdapter, TTSProvider):
             raise WyomingConnectionError(
                 f"[{self._entry['name']}] {result.reason}")
 
-    def synthesize_to_wav(self, text: str, path) -> Any:
-        from pathlib import Path
-        path = Path(path)
-        e = self._entry
-        timeout = float(e.get("request_timeout_s", DEFAULT_REQUEST_TIMEOUT_S))
+    def __init__(self, config: dict[str, Any]):
+        super().__init__(config)
+        self._stream_sr: int | None = None
 
+    @property
+    def sample_rate(self) -> int:
+        # The native rate is only known once audio-start arrives; 16 kHz
+        # placeholder before the first stream (the speaker reads this
+        # after the first chunk, by which time audio-start has arrived).
+        return self._stream_sr or 16000
+
+    def _synthesize_data(self, text: str) -> dict[str, Any]:
+        e = self._entry
         data: dict[str, Any] = {"text": text}
         # Mirrors upstream SynthesizeVoice.to_dict(): name wins, speaker
         # rides along; otherwise a bare language.
@@ -498,12 +505,60 @@ class WyomingTTS(WyomingAdapter, TTSProvider):
             voice["language"] = e["language"]
         if voice:
             data["voice"] = voice
+        return data
+
+    def generate_stream(self, text: str):
+        """Yield float32 mono chunks as ``audio-chunk`` events arrive.
+
+        Real streaming, not the ABC default: wyoming-piper (and friends)
+        emit audio while still synthesizing, so first-audio latency is
+        the time to the first chunk, not the whole utterance.
+        """
+        e = self._entry
+        timeout = float(e.get("request_timeout_s", DEFAULT_REQUEST_TIMEOUT_S))
+        self._stream_sr = None
+        conn = self._new_connection()
+        conn.connect(timeout=float(e.get("connect_timeout_s",
+                                         DEFAULT_CONNECT_TIMEOUT_S)))
+        try:
+            write_event(conn.sock, "synthesize", self._synthesize_data(text))
+            rate: int | None = None
+            while True:
+                ev = self._read_until(
+                    conn, {"audio-start", "audio-chunk", "audio-stop"}, timeout)
+                if ev.type == "audio-start":
+                    rate = int(ev.data["rate"])
+                    width = int(ev.data.get("width", 2))
+                    channels = int(ev.data.get("channels", 1))
+                    if width != 2 or channels != 1:
+                        raise WyomingProtocolError(
+                            f"[{e['name']}] unsupported TTS audio format: "
+                            f"{width * 8}-bit x{channels} "
+                            f"(only 16-bit mono is supported)")
+                    self._stream_sr = rate
+                elif ev.type == "audio-chunk":
+                    if ev.payload:
+                        yield (np.frombuffer(ev.payload, dtype=np.int16)
+                               .astype(np.float32) / 32768.0)
+                else:  # audio-stop
+                    break
+            if rate is None:
+                raise WyomingProtocolError(
+                    f"[{e['name']}] TTS stream ended without audio-start")
+        finally:
+            conn.close()
+
+    def synthesize_to_wav(self, text: str, path) -> Any:
+        from pathlib import Path
+        path = Path(path)
+        e = self._entry
+        timeout = float(e.get("request_timeout_s", DEFAULT_REQUEST_TIMEOUT_S))
 
         conn = self._new_connection()
         conn.connect(timeout=float(e.get("connect_timeout_s",
                                          DEFAULT_CONNECT_TIMEOUT_S)))
         try:
-            write_event(conn.sock, "synthesize", data)
+            write_event(conn.sock, "synthesize", self._synthesize_data(text))
             rate: int | None = None
             chunks: list[bytes] = []
             while True:

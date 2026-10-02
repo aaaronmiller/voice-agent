@@ -50,15 +50,17 @@ PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 PROFILES_DIR.mkdir(exist_ok=True)
 
 
-def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[str, str, bool | None, str]]:
+def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[str, str, bool | None, str, str]]:
     """Dropdown options from the slot registry: validated providers only.
 
-    Returns ``(config_key, display_label, valid, reason)`` tuples; external
-    (subprocess) providers get an " (external)" suffix on the label so users
+    Returns ``(config_key, display_label, valid, reason, cap_summary)`` tuples;
+    external (subprocess) providers get an " (external)" suffix on the label so users
     can tell them apart from built-ins. ``valid``/``reason`` come from the
     cached ``last_validation`` (populated by ``working()`` below, falling
     back to a live ``validate()`` when nothing is cached) so the UI can
-    show ✓/✗ marks with the reason as tooltip. ``valid`` is None for the
+    show ✓/✗ marks with the reason as tooltip. ``cap_summary`` is the
+    one-line Capability summary (streaming/batch, languages, CPU/GPU) shown
+    under the reason in the tooltip. ``valid`` is None for the
     hardcoded fallback entries, which carry no validation info.
 
     NOTE: this popup runs in the avatar sidecar process, which has its own
@@ -71,6 +73,7 @@ def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[
     try:
         from echo_node.slots import SlotType
         from echo_node.slots.registry import get_registry
+        from echo_node.adapters.ui_helpers import format_capability_summary
         slot = SlotType(slot_name)
         reg = get_registry()
         infos = reg.working(slot)
@@ -78,10 +81,11 @@ def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[
         for i in infos:
             res = i.last_validation or i.validate()
             pairs.append((i.name, i.name + (" (external)" if i.external else ""),
-                          res.ok, res.reason))
-        return pairs or [(n, n, None, "") for n in fallback]
+                          res.ok, res.reason,
+                          format_capability_summary(getattr(i, "capabilities", None))))
+        return pairs or [(n, n, None, "", "") for n in fallback]
     except Exception:
-        return [(n, n, None, "") for n in fallback]
+        return [(n, n, None, "", "") for n in fallback]
 
 
 def _valid_mark(valid: bool | None) -> str:
@@ -594,6 +598,16 @@ class SettingsPopup(QFrame):
         except Exception:
             return previous
 
+    def _provider_tooltip(self, reason: str, cap_summary: str) -> str:
+        """Combine the validation reason and capability summary for a
+        dropdown tooltip (capability line first — it's the stable fact,
+        the reason is the transient state)."""
+        reason = (reason or "").strip()
+        cap_summary = (cap_summary or "").strip()
+        if cap_summary and reason:
+            return cap_summary + "\n" + reason
+        return cap_summary or reason
+
     def _populate_provider_combos(self) -> None:
         """(Re)build the STT/TTS dropdowns from the registry, keeping selection."""
         for combo, slot_name, fallback in (
@@ -603,10 +617,11 @@ class SettingsPopup(QFrame):
             current = combo.currentData()
             combo.blockSignals(True)
             combo.clear()
-            for key, label, valid, reason in _registry_provider_names(slot_name, fallback):
+            for key, label, valid, reason, cap_summary in _registry_provider_names(slot_name, fallback):
                 combo.addItem(_valid_mark(valid) + label, key)
-                if reason:
-                    combo.setItemData(combo.count() - 1, reason,
+                tooltip = self._provider_tooltip(reason, cap_summary)
+                if tooltip:
+                    combo.setItemData(combo.count() - 1, tooltip,
                                       Qt.ItemDataRole.ToolTipRole)
             if current is not None:
                 idx = combo.findData(current)
@@ -620,20 +635,23 @@ class SettingsPopup(QFrame):
         try:
             from echo_node.slots import SlotType
             from echo_node.slots.registry import get_registry
+            from echo_node.adapters.ui_helpers import format_capability_summary
             reg = get_registry()
-            marks: dict[str, tuple[bool | None, str]] = {}
+            marks: dict[str, tuple[bool | None, str, str]] = {}
             for i in reg.all_providers(SlotType.AGENT_BACKEND):
                 res = i.last_validation or i.validate()
-                marks[i.name] = (res.ok, res.reason)
+                marks[i.name] = (res.ok, res.reason,
+                                 format_capability_summary(getattr(i, "capabilities", None)))
         except Exception:
             marks = {}
         self.backend_combo.blockSignals(True)
         self.backend_combo.clear()
         for key, label, gly in SettingsPopup._backend_options:
-            valid, reason = marks.get(key, (None, ""))
+            valid, reason, cap_summary = marks.get(key, (None, "", ""))
             self.backend_combo.addItem(f"{_valid_mark(valid)}{gly}  {label}", key)
-            if reason:
-                self.backend_combo.setItemData(self.backend_combo.count() - 1, reason,
+            tooltip = self._provider_tooltip(reason, cap_summary)
+            if tooltip:
+                self.backend_combo.setItemData(self.backend_combo.count() - 1, tooltip,
                                               Qt.ItemDataRole.ToolTipRole)
         if current is not None:
             idx = self.backend_combo.findData(current)

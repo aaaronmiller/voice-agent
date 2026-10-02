@@ -75,7 +75,17 @@
 ## 📋 REMAINING TASKS
 
 ### Priority 1: Streaming TTS
-- [ ] Wire dots.tts `generate_stream()` into InterruptibleSpeaker for first-token latency
+- [x] Wire `generate_stream()` into InterruptibleSpeaker for first-audio latency (2026-10-01)
+      — generalized: `TTSProvider.generate_stream()` is now an optional slot-ABC
+      method (default: synthesize whole utterance, yield one chunk); the speaker
+      takes the streaming playback path whenever the provider overrides it
+      (dots, cosyvoice3, voxcpn, Wyoming TTS), with barge-in between chunks,
+      blocking fallback on early failure, and mid-stream-failure downgrade.
+      Avatar lip-sync keeps the blocking path deliberately (Rhubarb needs the
+      full utterance). `t_tts_first_chunk` now measures first *audio* chunk.
+      Conformance: `echo_node/tests/test_tts_streaming.py` — 36 checks.
+      Real gate: first-audio latency on hardware (targets in
+      `docs/HARDWARE_TESTING.md` §7).
 - [ ] Kokoro chunked synthesis for long responses
 
 ### Priority 2: Smart Router Improvements

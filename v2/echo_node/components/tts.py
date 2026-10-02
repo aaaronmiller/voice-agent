@@ -219,7 +219,12 @@ class CosyVoice3TTS(TTSProvider):
 
 
 class Qwen3TTS(TTSProvider):
-    """Streaming TTS via Qwen3-TTS-0.6B (Alibaba, Apache-2.0).
+    """TTS via Qwen3-TTS-0.6B (Alibaba, Apache-2.0).
+
+    Batch synthesis (``generate_custom_voice``): upstream ``qwen_tts``
+    supports offline inference only — streaming exists solely in
+    third-party forks, so this provider is honestly advertised as
+    batch (``streaming=False``) until a streaming surface is verified.
 
     API surface written against the documented upstream package (verified
     2026-10-01 against Qwen/Qwen3-TTS and community mirrors):
@@ -261,12 +266,15 @@ class Qwen3TTS(TTSProvider):
             name="qwen3-tts",
             version="0.6B (12Hz)",
             languages=["en", "zh", "ja", "ko", "de", "fr", "ru", "es", "pt", "it"],
-            streaming=True,   # ~97ms first-packet per ROADMAP survey
+            streaming=False,  # upstream qwen_tts is offline-only (batch);
+                               # streaming lives in third-party forks only
             vram_gb=4.0,      # estimate — verify the quantized path fits 6GB VRAM
             gpu_required=True,
             license="Apache-2.0",
             network=False,
-            notes=("streaming tier + 3s zero-shot clone (Base variant); "
+            notes=("3s zero-shot clone (Base variant); batch synthesis — "
+                   "upstream qwen_tts has no streaming API (third-party "
+                   "forks only, unverified); "
                    "VRAM/language figures from upstream docs, unverified on "
                    "target hardware; experimental"),
         )

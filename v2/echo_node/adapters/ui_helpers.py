@@ -95,6 +95,50 @@ def summarize_command(argv: list[str] | tuple[str, ...]) -> str:
     return text[:69] + "..."
 
 
+def format_capability_summary(cap: Any) -> str:
+    """One-line human summary of a provider's Capability descriptor.
+
+    Duck-typed (no ``echo_node`` import — this module stays stdlib-only):
+    reads ``streaming``, ``languages``, ``sample_rate``/``sample_rates``,
+    ``gpu_required``, ``vram_gb``, ``network``, ``license`` and ``notes``
+    attributes when present. Returns ``""`` for a missing/empty capability
+    so callers can fall back to the validation reason alone.
+    """
+    if cap is None:
+        return ""
+    get = lambda name, default=None: getattr(cap, name, default)  # noqa: E731
+    parts: list[str] = []
+    streaming = get("streaming")
+    if streaming is True:
+        parts.append("streaming")
+    elif streaming is False:
+        parts.append("batch")
+    langs = get("languages") or []
+    if langs:
+        parts.append("/".join(str(l) for l in langs[:6]))
+    sr = get("sample_rate") or get("sample_rates")
+    if sr:
+        if isinstance(sr, (list, tuple)):
+            parts.append(f"{'/'.join(str(s) for s in sr)} Hz")
+        else:
+            parts.append(f"{sr} Hz")
+    if get("gpu_required"):
+        vram = get("vram_gb")
+        parts.append(f"GPU~{vram:g}GB" if vram else "GPU")
+    else:
+        parts.append("CPU")
+    if get("network"):
+        parts.append("network")
+    lic = get("license")
+    if lic and lic != "unknown":
+        parts.append(str(lic))
+    notes = get("notes")
+    text = " · ".join(parts)
+    if notes:
+        text += f" — {notes}"
+    return text[:280]
+
+
 _TOP_LEVEL_KEY_RE = re.compile(r"^([A-Za-z0-9_][\w.\-]*)\s*:")
 
 
@@ -190,5 +234,6 @@ __all__ = [
     "format_args_text",
     "build_entry_dict",
     "summarize_command",
+    "format_capability_summary",
     "replace_top_level_block",
 ]
