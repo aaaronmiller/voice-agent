@@ -103,6 +103,17 @@ class ProviderRegistry:
     def info(self, slot: SlotType, name: str) -> ProviderInfo:
         return self._providers[(slot, name)]
 
+    def unregister(self, slot: SlotType, name: str) -> bool:
+        """Remove ``(slot, name)`` from the registry.
+
+        Used by the external-provider settings flow to replace a live
+        registration (unregister-then-register on save, unregister on
+        remove). Returns True when an entry was actually removed; never
+        raises. Built-ins are never unregistered by that flow — it only
+        ever passes names that came from ``external_providers:``.
+        """
+        return self._providers.pop((slot, name), None) is not None
+
     def all_names(self, slot: SlotType) -> list[str]:
         return sorted(n for (s, n) in self._providers if s is slot)
 
@@ -181,16 +192,25 @@ def register_builtin(reg: ProviderRegistry | None = None) -> ProviderRegistry:
                  capabilities=ParakeetSTT.capabilities())
 
     # ── TTS ──
-    from echo_node.components.tts import KokoroTTS, DotsTTS, CosyVoice3TTS, EspeakTTS
+    from echo_node.components.tts import (
+        KokoroTTS, DotsTTS, CosyVoice3TTS, EspeakTTS, Qwen3TTS, VoxCPMTTS,
+    )
     reg.register(SlotType.TTS, "kokoro", KokoroTTS)
     reg.register(SlotType.TTS, "dots", DotsTTS)
     reg.register(SlotType.TTS, "cosyvoice3", CosyVoice3TTS, experimental=True)
+    # Phase C: streaming + expressive tiers; experimental until validated
+    # on target hardware. Defaults unchanged (kokoro stays default).
+    reg.register(SlotType.TTS, "qwen3-tts", Qwen3TTS, experimental=True)
+    reg.register(SlotType.TTS, "voxcpn", VoxCPMTTS, experimental=True)
     reg.register(SlotType.TTS, "espeak-ng", EspeakTTS)
 
     # ── VAD / wake word ──
-    from echo_node.components.vad import OpenWakeWordVad
+    from echo_node.components.vad import OpenWakeWordVad, SileroVAD
     from echo_node.components.wake import WakeDetector
     reg.register(SlotType.VAD, "openwakeword", OpenWakeWordVad)
+    # Phase C: real Silero v6; experimental until validated on hardware.
+    # Default stays openwakeword.
+    reg.register(SlotType.VAD, "silero", SileroVAD, experimental=True)
     reg.register(SlotType.WAKE_WORD, "openwakeword", WakeDetector)
 
     # ── Audio I/O (alsa vs sounddevice share MicStream; probes differ) ──
@@ -234,6 +254,10 @@ def register_builtin(reg: ProviderRegistry | None = None) -> ProviderRegistry:
     from echo_node.components.barge_in import VadGatedBargeIn
     reg.register(SlotType.BARGE_IN, "vad_gated", VadGatedBargeIn)
 
+    # ── AEC (Phase C): WebRTC AEC3 wrapper around mic capture ──
+    from echo_node.components.aec import AecAudioIO
+    reg.register(SlotType.AUDIO_IO, "aec-webrtc", AecAudioIO, experimental=True)
+
     # ── Agent backends (ABC + REGISTRY already live in echo_node.backends) ──
     from echo_node import backends as _b
     for _key, _cls in _b.REGISTRY.items():
@@ -257,6 +281,25 @@ def register_builtin(reg: ProviderRegistry | None = None) -> ProviderRegistry:
             ),
             validate_fn=lambda cfg, _exc=exc: _v.missing_result(
                 "avatar.controller", {"import_error": str(_exc)}),
+        )
+    # Phase C: LiveTalking-style harness around the MuseTalk prototype —
+    # genuinely implements the AvatarRenderer contract (preload/play/stop),
+    # experimental until validated on target hardware.
+    try:
+        from avatar_video.livetalking_musetalk import LiveTalkingMuseTalk
+        reg.register(SlotType.AVATAR, "musetalk-livetalking", LiveTalkingMuseTalk,
+                     experimental=True)
+    except ImportError as exc:
+        reg.register(
+            SlotType.AVATAR, "musetalk-livetalking", type("MissingLiveTalkingMuseTalk", (), {}),
+            experimental=True,
+            capabilities=Capability(
+                name="musetalk-livetalking", gpu_required=True, license="unknown",
+                network=False,
+                notes=(f"avatar_video.livetalking_musetalk not importable here: {exc}"),
+            ),
+            validate_fn=lambda cfg, _exc=exc: _v.missing_result(
+                "avatar_video.livetalking_musetalk", {"import_error": str(_exc)}),
         )
     try:
         from avatar_video.musetalk_assistant import MuseTalkRenderer

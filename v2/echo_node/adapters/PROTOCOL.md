@@ -152,3 +152,97 @@ guarantee above — see `echo_node/tests/test_phase_b.py`.
 The protocol has no streaming methods yet (no `transcribe_stream` /
 `synthesize_stream`). The host sends whole utterances and writes whole
 wavs. Streaming is Phase D work, alongside the Wyoming TCP adapters.
+
+---
+
+# Wyoming TCP transport (Phase D)
+
+Any Wyoming-protocol server (wyoming-faster-whisper, wyoming-piper,
+wyoming-openwakeword, …) can take the `stt`, `tts`, or `wake_word`
+slot over TCP — no subprocess, no JSON-RPC. Implementation:
+`echo_node/adapters/wyoming.py` (`WyomingAdapter` base + `WyomingSTT` /
+`WyomingTTS` / `WyomingWakeWord`, built by `make_wyoming_provider`).
+
+## Trust model
+
+The trust boundary is unchanged: the config file. A `transport: tcp`
+entry names a `host` (default `127.0.0.1`) and a `port` (required);
+`command`/`args` are **startup-fatal** for tcp entries — the adapter
+only opens a TCP connection, it never spawns anything, so there is no
+executable-path surface at all. `validate()` is a TCP connect probe
+(3 s); refused/timed out → honest missing-result, never an exception,
+so the provider simply stays out of the settings dropdowns until its
+server is running. Registered with `external=True`, marked
+" (external)" like subprocess providers.
+
+## Framing (verified against upstream)
+
+Event names and framing were verified against the upstream wyoming
+source (rhasspy/wyoming, now OHF-Voice/wyoming, main, 2026-10-01:
+`event.py`, `asr.py`, `tts.py`, `wake.py`, `audio.py`). The `wyoming`
+PyPI package is deliberately not used — the client is stdlib-only
+(sockets + json + numpy), so there is no new dependency to install.
+
+One event on the wire is:
+
+```
+{"type": <str>, "version": <str>, "data_length": N, "payload_length": M}\n
+<data_length bytes of JSON>        # the event's "data" dict
+<payload_length bytes of raw data> # e.g. PCM for audio-chunk
+```
+
+`payload_length` is omitted when there is no payload. We send
+`version: "echo-node"` (servers ignore it). The reader is
+deadline-bounded and never over-reads: a fresh buffered reader is
+created per event, so reading even one byte past the declared lengths
+would swallow the next event's header.
+
+## Event flows
+
+| slot      | client sends                                              | server answers                              |
+|-----------|-----------------------------------------------------------|---------------------------------------------|
+| stt       | `transcribe` (`name`?, `language`?) then `audio-start` / `audio-chunk`+ / `audio-stop` (16 kHz mono PCM16) | `transcript` (`text`) — streaming servers may also emit `transcript-chunk` (each chunk *replaces* the previous); a bare `transcript-stop` falls back to the last chunk |
+| tts       | `synthesize` (`text`, `voice` = `{name, speaker?}` or `{language}`) | `audio-start` (rate/width/channels) / `audio-chunk`+ (PCM payload) / `audio-stop`; concatenated and written as WAV at the server's rate. Only 16-bit mono server output is supported |
+| wake_word | `detect` (`names`?) then `audio-start` / `audio-chunk`+ / `audio-stop` | `detection` (`name`?) → `(True, name, 1.0)`; `not-detected` → `(False, "", 0.0)`. Upstream `Detection` carries **no confidence score** — 1.0/0.0 are presence flags, not calibrated confidences |
+
+An `error` event from the server raises `WyomingProtocolError` with
+the server's text. Connections are per-request (connect → send → read
+→ close); there is no reconnect state machine.
+
+## Config schema (tcp entries)
+
+```yaml
+external_providers:
+  - slot: stt
+    name: wy-faster-whisper
+    transport: tcp          # default is `subprocess`
+    host: 127.0.0.1        # default
+    port: 10300            # required. Conventional Wyoming defaults
+                           # (confirm against your server): faster-whisper
+                           # 10300, piper 10200, openwakeword 10400
+    model: tiny-int8        # optional → transcribe `name`
+    language: en            # optional → transcribe `language` / tts voice language
+    voice_name: en_US-amy-medium  # optional → synthesize `voice.name`
+    voice_speaker: spk1     # optional, rides along with voice_name
+    phrase_names: ["hey_jarvis"]   # optional → detect `names`
+    connect_timeout_s: 3.0
+    request_timeout_s: 30.0
+    chunk_samples: 1024
+```
+
+Not served over Wyoming TCP: the VAD slot (the protocol's
+`voice-started`/`voice-stopped` events are not a per-chunk query),
+`agent_backend`, and everything the subprocess transport doesn't
+cover either. Schema violations (`transport: bogus`, tcp + `command`,
+missing/bad `port`, unsupported slot) fail startup with
+`ExternalProviderError`.
+
+## Honest gaps
+
+- No real Wyoming server exists on the build VM; round-trips are
+  verified against fake TCP servers in `echo_node/tests/test_phase_d.py`
+  only. Run against the real servers before trusting this in production.
+- The conventional ports are the projects' documented defaults, not
+  re-verified against live servers in this session.
+- The `error`-event shape follows wyoming convention (type `error`,
+  data `text`/`code`) but was not re-verified against a live server.

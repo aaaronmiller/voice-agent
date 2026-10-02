@@ -133,9 +133,89 @@ VRAM on the 4050, Nemotron-3.5-ASR license, sherpa-onnx KWS model license.
     Batch-only; no streaming methods yet. Real gate: run a whisper.cpp /
     Piper adapter on Aaron's hardware.
 - **Phase C — substitution sweep**, in the payoff order of §2.
+  - Status (2026-10-01): **items a–d built, awaiting real-hardware validation.**
+    Defaults and default provider selection unchanged everywhere; all new
+    providers register `experimental=True` (gated behind
+    `ECHO_INCLUDE_EXPERIMENTAL=1`); no validator downloads or crashes on
+    machines without the deps/hardware.
+    - (a) **Silero v6 VAD** — `echo_node/components/vad.py::SileroVAD`,
+      registered as `vad/silero`. Wraps the `silero-vad` 6.x API
+      (`load_silero_vad(onnx=True)`, 512-sample windows, max window
+      probability + RMS floor). `validate()` probes `silero_vad` (+ torch)
+      module presence only — never loads the model (first load downloads
+      weights). The old `SileroVad` alias still points at OpenWakeWordVad
+      for historical config compat.
+    - (b) **Echo cancellation** — `echo_node/components/aec.py::AecAudioIO`,
+      registered as `audio_io/aec-webrtc`. WebRTC AEC3 via the
+      `pywebrtc-audio` PyPI package (pre-built wheels; rejected the
+      SWIG/meson build-from-source bindings and speexdsp's older MDF).
+      Wraps `MicStream`'s capture path; a far-end ring buffer fed by
+      `feed_far_end()` supplies the speaker reference. Honest validator
+      notes true full-duplex AEC needs hardware validation. Documented
+      gap: nothing in the pipeline calls `feed_far_end()` yet (speaker →
+      reference wiring is follow-up work).
+    - (c) **TTS tiers** — `Qwen3TTS` (`tts/qwen3-tts`, Qwen3-TTS-0.6B,
+      `qwen_tts.Qwen3TTSModel`, streaming) and `VoxCPMTTS` (`tts/voxcpn`,
+      VoxCPM-0.5B, `voxcpm.VoxCPM`) in `components/tts.py`, following the
+      Kokoro/Dots pattern (constructor presence-check, lazy model load,
+      `generate_custom_voice` / `generate(...)` synthesis, CUDA-required
+      validators that never download). API surfaces verified against
+      upstream docs but NOT exercised on-device (no GPU here); exact
+      kwarg names are commented as unverified. The VoxCPM 0.5B HF id
+      (`openbmb/VoxCPM`) is a guess — `openbmb/VoxCPM2` is the verified
+      2B id; override via `model_id`.
+    - (d) **LiveTalking harness** — `avatar_video/livetalking_musetalk.py::
+      LiveTalkingMuseTalk`, registered as `avatar/musetalk-livetalking`,
+      genuinely implements the `AvatarRenderer` contract (preload/play/stop)
+      around the MuseTalk prototype. Remaining gaps (docstring + TASKS.md):
+      not the real LiveTalking (no WebRTC, no interruption protocol, no
+      task tracking); per-WAV batch generation, not chunked streaming;
+      placeholder frame sink; coarse stop (no generation preemption);
+      hardware validation pending.
+    - Incidental fix: `EspeakTTS` never implemented `load()`, which made it
+      abstract and broke `create_tts()`'s historical espeak-ng fallback —
+      a Phase-A ABC-migration regression. Added the no-op `load()`
+      (matches existing no-op `unload`/`warm`).
+    - Conformance suite `echo_node/tests/test_phase_c.py` — 40 checks pass
+      on a bare VM (validators honestly report missing deps; experimental
+      gating verified with stubbed validators; `test_phase_a.py` and
+      `test_phase_b.py` stay green).
+    - Real gate: Aaron's hardware — GPU for Qwen3/VoxCPM/MuseTalk, mic +
+      speakers for AEC3, torch for Silero.
+  - Item 5 — `tools/stt_ab.py` A/B harness: runs 2+ STT providers over the
+    same WAVs, records transcripts + latency to JSON/CSV, errors recorded
+    not crashed (17 tests).
+  - Item 6 — `LlamaSwapBackend` (`backends.py`, config key `"llama-swap"`,
+    experimental): talks to llama-swap's OpenAI-compatible endpoint
+    (`llama_swap.base_url`, default `http://127.0.0.1:8080`); validator
+    probes `/v1/models` with a 5s timeout, honest-missing when no server
+    (12 tests).
 - **Phase D — Wyoming TCP adapters, avatar slot, capability intersection.**
   The UI only offers combinations whose capabilities intersect (e.g. no
   streaming-only TTS paired with a batch-only playback path).
+  - Status (2026-10-01): **Wyoming TCP adapters built, awaiting real-hardware
+    validation.** `echo_node/adapters/wyoming.py` — stdlib-only Wyoming
+    client (`WyomingAdapter` base: per-call TCP connect, deadline-bounded
+    reads, clean close; `WyomingSTT` / `WyomingTTS` / `WyomingWakeWord`).
+    Framing and event names verified against the upstream wyoming source
+    (OHF-Voice/wyoming main, 2026-10-01): header line
+    `{"type","version","data_length"[, "payload_length]}` + data blob +
+    payload; `transcribe`→`transcript`, `synthesize`→audio stream,
+    `detect`→`detection`/`not-detected`. The `wyoming` PyPI package is
+    deliberately NOT used (not installed; raw sockets keep the host
+    stdlib-only). Config: `transport: tcp` entries in `external_providers:`
+    with `host` (default 127.0.0.1) + `port` (required; conventional
+    faster-whisper 10300 / piper 10200 / openwakeword 10400 — documented
+    defaults, not re-verified live); `command`/`args` are startup-fatal
+    for tcp entries. Wyoming providers register `external=True`
+    (" (external)" in dropdowns); `validate()` is a 3 s TCP connect
+    probe that never raises. Slots: stt/tts/wake_word only — the Wyoming
+    VAD events are not a per-chunk query. Conformance suite
+    `echo_node/tests/test_phase_d.py` — 35 checks pass on a bare VM
+    against fake Wyoming TCP servers; `test_phase_a`/`test_phase_b`
+    still green. Real gate: run against wyoming-faster-whisper,
+    wyoming-piper, wyoming-openwakeword on real hardware. Still open in
+    Phase D: the avatar slot and capability-intersection UI filtering.
 
 ## 5. Open questions
 

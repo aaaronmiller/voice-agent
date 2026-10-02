@@ -788,6 +788,110 @@ class OpenAIRealtimeBackend(AgentBackend):
                 "Run it directly: python providers/openai_realtime.py")
 
 
+# ── llama-swap (local model router) ─────────────────────────────────
+# Phase C (item f): treats llama-swap's OpenAI-compatible endpoint as the
+# chat backend. llama-swap proxies to llama-server instances and hot-swaps
+# models on demand, so this one backend serves many local models.
+
+class LlamaSwapBackend(AgentBackend):
+    """Local model router via llama-swap (OpenAI-compatible chat completions).
+
+    Config (new ``llama_swap:`` section — added Phase C, no existing key
+    renamed):
+      base_url: "http://127.0.0.1:8080"   (llama-swap listener; /v1 appended)
+      model: "<model id>"                 (as listed by GET /v1/models)
+      api_key: ""                          (optional; llama-swap usually needs none)
+      timeout_seconds: 90
+    """
+
+    name: str = "llama-swap (experimental)"
+    config_key: str = "llama-swap"
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config=config)
+        self.base_url = str(config.get("base_url", "http://127.0.0.1:8080")).rstrip("/")
+        self.model = str(config.get("model", ""))
+        self.api_key = str(config.get("api_key", "")
+                           or os.environ.get("LLAMA_SWAP_API_KEY", ""))
+        self.timeout = float(config.get("timeout_seconds", 90))
+
+    def _models_url(self) -> str:
+        return self.base_url + "/v1/models"
+
+    def _chat_url(self) -> str:
+        return self.base_url + "/v1/chat/completions"
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="llama-swap",
+            languages=["en"],
+            streaming=False,    # chat() only; chat_stream() wraps it
+            gpu_required=False,  # server-side concern, not the client's
+            license="unknown",
+            network=True,        # localhost HTTP (127.0.0.1 by default)
+            notes=("local model router: hot-swaps llama-server models behind "
+                   "an OpenAI-compatible endpoint; experimental — needs a "
+                   "running llama-swap server, not validated on target hardware yet"),
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        # Never downloads, never raises: a connection-refused/timeout
+        # becomes an honest missing-result.
+        cfg = config or {}
+        base = str(cfg.get("base_url", "http://127.0.0.1:8080")).rstrip("/")
+        url = base + "/v1/models"
+        try:
+            r = requests.get(url, timeout=5)
+        except Exception as exc:
+            return ValidationResult(
+                False, f"llama-swap not reachable: {exc}", {"models_url": url})
+        if r.status_code != 200:
+            return ValidationResult(
+                False, f"llama-swap returned HTTP {r.status_code}",
+                {"models_url": url})
+        try:
+            data = r.json()
+            models = [m.get("id") for m in data.get("data", [])
+                      if isinstance(m, dict)]
+        except Exception:
+            models = []
+        return ok_result(f"llama-swap reachable ({url})",
+                         {"models_url": url, "models": models})
+
+    def is_available(self) -> bool:
+        try:
+            r = requests.get(self._models_url(), timeout=3)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def chat(self, text: str, system: str = "") -> str:
+        if not self.model:
+            return _spoken_error(
+                "llama-swap", ValueError("no model configured (set llama_swap.model)"))
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": text})
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        try:
+            r = requests.post(
+                self._chat_url(),
+                headers=headers,
+                json={"model": self.model, "messages": messages, "stream": False},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            data = r.json()
+            return str(data["choices"][0]["message"]["content"]).strip()
+        except Exception as exc:
+            return _spoken_error("llama-swap", exc)
+
+
 # ── Registry ────────────────────────────────────────────────────────
 
 REGISTRY: dict[str, type[AgentBackend]] = {
@@ -800,11 +904,14 @@ REGISTRY: dict[str, type[AgentBackend]] = {
     # Experimental voice-native providers (standalone CLI; chat() unsupported)
     "gemini_live": GeminiLiveBackend,
     "openai_realtime": OpenAIRealtimeBackend,
+    # Experimental: local model router via llama-swap's OpenAI-compatible
+    # endpoint (needs a running llama-swap server)
+    "llama-swap": LlamaSwapBackend,
 }
 
 # Backends that stay out of settings dropdowns unless experimental
 # providers are explicitly opted in (ECHO_INCLUDE_EXPERIMENTAL=1).
-EXPERIMENTAL_BACKENDS: set[str] = {"gemini_live", "openai_realtime"}
+EXPERIMENTAL_BACKENDS: set[str] = {"gemini_live", "openai_realtime", "llama-swap"}
 
 # Labels for the settings popup dropdown (provider_key → display name)
 BACKEND_LABELS: dict[str, str] = {

@@ -145,7 +145,15 @@ for slot in SlotType:
 
 exp_names = {i.name for s in SlotType for i in REG.all_providers(s) if i.experimental}
 check("experimental set is as expected",
-      exp_names == {"cosyvoice3", "gemini_live", "openai_realtime", "musetalk"},
+      exp_names == {
+          # Phase A/B baseline
+          "cosyvoice3", "gemini_live", "openai_realtime", "musetalk",
+          # Phase C(e-f): llama-swap local model router
+          "llama-swap",
+          # Phase C(a-d, concurrent worker): silero VAD, qwen3-tts/voxcpn TTS,
+          # aec-webrtc audio I/O, musetalk-livetalking avatar
+          "silero", "qwen3-tts", "voxcpn", "aec-webrtc", "musetalk-livetalking",
+      },
       f"got {sorted(exp_names)}")
 
 

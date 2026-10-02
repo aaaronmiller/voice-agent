@@ -31,8 +31,12 @@ from echo_node.slots.registry import get_registry
 # ── Assistant (orchestrator) ────────────────────────────────────────
 
 class Assistant:
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any],
+                 config_path: Path | str | None = None):
         self.config = config
+        # Path of the config.yaml this run loaded (None when unknown).
+        # Needed to persist external_provider_save/remove back to the file.
+        self.config_path = Path(config_path) if config_path else None
         self.audio_config = AudioConfig(**config["audio"])
         self.mic = MicStream(self.audio_config)
         self.wake = WakeDetector(config.get("wake_word", {}))
@@ -47,7 +51,12 @@ class Assistant:
         # Avatar
         try:
             from avatar import build as build_avatar
-            self.avatar = build_avatar(config.get("avatar", {}))
+            avatar_cfg = dict(config.get("avatar", {}) or {})
+            if self.config_path is not None:
+                # Runtime plumbing only (not a user config key): lets the
+                # sidecar's settings popup read external_providers:.
+                avatar_cfg["config_path"] = str(self.config_path)
+            self.avatar = build_avatar(avatar_cfg)
             if hasattr(self.avatar, 'on_setting'):
                 self.avatar.on_setting = self._on_setting_from_avatar
         except Exception as exc:
@@ -217,6 +226,170 @@ class Assistant:
             name = kw.get("name", "")
             if name:
                 print(f"[settings] profile loaded: {name}", flush=True)
+        elif cmd == "external_provider_save":
+            self._save_external_provider(kw.get("entry"))
+        elif cmd == "external_provider_remove":
+            self._remove_external_provider(str(kw.get("slot", "")),
+                                           str(kw.get("name", "")))
+
+    # ── External providers: UI-driven persistence ────────────────────
+    # The settings popup's External tab edits config.yaml's
+    # external_providers: through these handlers. The file stays the
+    # source of truth; the live registry is updated to match.
+
+    def _external_result(self, ok: bool, message: str, name: str = "") -> None:
+        """Report a save/remove outcome: log it and send it to the popup."""
+        print(f"[settings] external provider: {message}", flush=True)
+        avatar = getattr(self, "avatar", None)
+        if avatar is not None and hasattr(avatar, "_send"):
+            try:
+                avatar._send({"cmd": "external_provider_result",
+                              "ok": bool(ok), "message": str(message),
+                              "name": name})
+            except Exception:
+                pass
+
+    def _read_config_file(self) -> tuple[dict[str, Any] | None, str | None]:
+        """(parsed config.yaml, error)."""
+        import yaml
+        if self.config_path is None:
+            return None, "assistant has no config path (cannot persist)"
+        try:
+            cfg = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            return None, f"cannot read {self.config_path}: {exc}"
+        return cfg, None
+
+    def _write_config_file(self, cfg: dict[str, Any]) -> str | None:
+        """Write back config.yaml, preserving all other keys. Returns error or None."""
+        import yaml
+        assert self.config_path is not None
+        try:
+            self.config_path.write_text(
+                yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False,
+                               allow_unicode=True),
+                encoding="utf-8")
+        except Exception as exc:
+            return f"cannot write {self.config_path}: {exc}"
+        return None
+
+    def _save_external_provider(self, entry_raw: Any) -> None:
+        from echo_node.adapters import ExternalProviderError, _validate_entry
+        from echo_node.adapters.subprocess_adapter import make_external_provider
+        from echo_node.slots.registry import get_registry
+
+        if not isinstance(entry_raw, dict):
+            self._external_result(False, "save rejected: entry must be a mapping")
+            return
+        try:
+            norm = _validate_entry(entry_raw, 0)
+        except ExternalProviderError as exc:
+            # Reject loudly, never crash the assistant on a bad UI payload.
+            self._external_result(False, f"save rejected: {exc}")
+            return
+        slot, name = norm["slot_enum"], norm["name"]
+
+        # Collision check BEFORE touching the file: a name that collides
+        # with a built-in must never be persisted (startup treats it as
+        # fatal). Re-saving an existing *external* under the same name is
+        # the upsert case and is allowed.
+        reg = get_registry()
+        try:
+            existing = reg.info(slot, name)
+        except KeyError:
+            existing = None
+        if existing is not None and not existing.external:
+            self._external_result(
+                False,
+                f"save rejected: {name!r} collides with an existing "
+                f"{slot.value} provider", name)
+            return
+
+        cfg, err = self._read_config_file()
+        if err is not None:
+            self._external_result(False, f"save rejected: {err}", name)
+            return
+        assert cfg is not None
+        entries = cfg.get("external_providers")
+        if entries is None:
+            entries = []
+            cfg["external_providers"] = entries
+        if not isinstance(entries, list):
+            self._external_result(
+                False, "save rejected: 'external_providers' must be a list", name)
+            return
+        # Upsert by (slot, name); persist the config-shaped record.
+        record = dict(entry_raw)
+        replaced = False
+        for i, e in enumerate(entries):
+            if isinstance(e, dict) and e.get("slot") == norm["slot"] \
+                    and e.get("name") == name:
+                entries[i] = record
+                replaced = True
+                break
+        if not replaced:
+            entries.append(record)
+        err = self._write_config_file(cfg)
+        if err is not None:
+            self._external_result(False, f"save rejected: {err}", name)
+            return
+        # Keep the in-memory config in sync with the file we just wrote.
+        self.config["external_providers"] = entries
+
+        # Re-register into the LIVE registry: drop our own stale entry
+        # first (no-op when absent), then register the fresh class.
+        reg.unregister(slot, name)
+        cls = make_external_provider(norm)
+        info = reg.register(slot, name, cls,
+                            experimental=norm["experimental"], external=True)
+        # Eager validation so the UI gets an honest status right away.
+        try:
+            res = info.validate()
+            vmsg = f"validation {'✓' if res.ok else '✗'}: {res.reason}"
+        except Exception as exc:
+            vmsg = f"validation error: {exc}"
+        self._external_result(
+            True,
+            f"{'updated' if replaced else 'saved'} {slot.value}/{name} "
+            f"to {self.config_path.name} — {vmsg}", name)
+
+    def _remove_external_provider(self, slot_str: str, name: str) -> None:
+        from echo_node.slots import SlotType
+        from echo_node.slots.registry import get_registry
+
+        try:
+            slot = SlotType(slot_str)
+        except ValueError:
+            self._external_result(False, f"remove rejected: unknown slot {slot_str!r}",
+                                  name)
+            return
+        cfg, err = self._read_config_file()
+        if err is not None:
+            self._external_result(False, f"remove rejected: {err}", name)
+            return
+        assert cfg is not None
+        entries = cfg.get("external_providers") or []
+        if not isinstance(entries, list):
+            self._external_result(
+                False, "remove rejected: 'external_providers' must be a list", name)
+            return
+        idx = next((i for i, e in enumerate(entries)
+                    if isinstance(e, dict) and e.get("slot") == slot.value
+                    and e.get("name") == name), None)
+        if idx is None:
+            self._external_result(
+                False, f"remove rejected: {slot.value}/{name} not in "
+                       f"{self.config_path.name}", name)
+            return
+        del entries[idx]
+        err = self._write_config_file(cfg)
+        if err is not None:
+            self._external_result(False, f"remove rejected: {err}", name)
+            return
+        self.config["external_providers"] = entries
+        get_registry().unregister(slot, name)
+        self._external_result(
+            True, f"removed {slot.value}/{name} from {self.config_path.name}", name)
 
     def run(self) -> int:
         signal.signal(signal.SIGINT, self._stop)

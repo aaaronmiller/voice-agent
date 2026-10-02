@@ -258,7 +258,7 @@ def main() -> int:
             print(f"[config] {err}", file=sys.stderr)
         return 1
     try:
-        return Assistant(config).run()
+        return Assistant(config, config_path=Path(args.config)).run()
     except Exception as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 1

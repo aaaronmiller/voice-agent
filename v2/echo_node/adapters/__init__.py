@@ -1,21 +1,37 @@
-"""External (subprocess) providers for Echo-Node v2 (Phase B).
+"""External providers for Echo-Node v2 (Phases B + D).
 
-An *external provider* is any program that speaks the JSON-RPC 2.0
-adapter protocol (see ``echo_node/adapters/PROTOCOL.md``) over stdio.
-External providers are **declared in the config file** — the trust
-boundary — and never typed into the settings UI:
+An *external provider* is declared in the config file — the trust
+boundary — and never typed into the settings UI. Two transports:
 
-.. code-block:: yaml
+* ``transport: subprocess`` (default, Phase B): any program speaking the
+  JSON-RPC 2.0 adapter protocol over stdio.
 
-    external_providers:
-      - slot: stt
-        name: whispercpp
-        command: ["builtin:stt_whispercpp.py"]
-        args: ["--model", "/models/ggml-base.bin"]
+    .. code-block:: yaml
+
+        external_providers:
+          - slot: stt
+            name: whispercpp
+            command: ["builtin:stt_whispercpp.py"]
+            args: ["--model", "/models/ggml-base.bin"]
+
+* ``transport: tcp`` (Phase D): a Wyoming-protocol server
+  (wyoming-faster-whisper, wyoming-piper, wyoming-openwakeword, ...).
+  No command is spawned — the adapter only opens a TCP connection.
+
+    .. code-block:: yaml
+
+        external_providers:
+          - slot: stt
+            name: wy-faster-whisper
+            transport: tcp
+            host: 127.0.0.1   # default
+            port: 10300        # required (conventional Wyoming ports:
+                               # faster-whisper 10300, piper 10200,
+                               # openwakeword 10400)
 
 At startup :func:`register_external_providers` validates each entry and
-registers a :class:`Subprocess*` provider class into the slot registry
-with ``external=True``. Validated externals then appear in the existing
+registers a provider class into the slot registry with
+``external=True``. Validated externals then appear in the existing
 registry-driven settings dropdowns automatically (marked " (external)").
 """
 
@@ -95,12 +111,8 @@ def _validate_entry(raw: Any, index: int) -> dict[str, Any]:
             f"{where}: unknown slot {slot_raw!r} — must be one of "
             f"{sorted(s.value for s in SlotType)}") from None
 
-    from echo_node.adapters.subprocess_adapter import SUPPORTED_SLOTS
-    if slot not in SUPPORTED_SLOTS:
-        raise ExternalProviderError(
-            f"{where}: slot {slot.value!r} cannot be served by a subprocess "
-            f"adapter in Phase B (supported: "
-            f"{sorted(s.value for s in SUPPORTED_SLOTS)})")
+    # NOTE: slot-vs-transport support is checked per transport below
+    # (subprocess vs tcp), not here.
 
     name = raw.get("name")
     if not isinstance(name, str) or not _NAME_RE.fullmatch(name):
@@ -113,13 +125,11 @@ def _validate_entry(raw: Any, index: int) -> dict[str, Any]:
             f"{where}: unsupported protocol_version {protocol_version!r} — "
             f"this host speaks version 1")
 
-    command = raw.get("command", [])
-    args = raw.get("args", [])
-    if not isinstance(command, list):
-        raise ExternalProviderError(f"{where}: 'command' must be a list, got {type(command).__name__}")
-    if not isinstance(args, list):
-        raise ExternalProviderError(f"{where}: 'args' must be a list, got {type(args).__name__}")
-    argv = resolve_command(command, args, name=name)
+    transport = raw.get("transport", "subprocess")
+    if transport not in ("subprocess", "tcp"):
+        raise ExternalProviderError(
+            f"{where}: 'transport' must be 'subprocess' or 'tcp', "
+            f"got {transport!r}")
 
     def _num(key: str, default: float) -> float:
         val = raw.get(key, default)
@@ -128,17 +138,113 @@ def _validate_entry(raw: Any, index: int) -> dict[str, Any]:
         except (TypeError, ValueError):
             raise ExternalProviderError(f"{where}: {key!r} must be a number, got {val!r}") from None
 
-    return {
+    def _str_list(key: str) -> list[str]:
+        val = raw.get(key, [])
+        if not isinstance(val, list) or not all(
+                isinstance(v, str) and v for v in val):
+            raise ExternalProviderError(
+                f"{where}: {key!r} must be a list of non-empty strings, "
+                f"got {val!r}")
+        return list(val)
+
+    common = {
         "name": name,
         "slot": slot.value,
         "slot_enum": slot,
-        "argv": argv,
+        "transport": transport,
         "request_timeout_s": _num("request_timeout_s", 30.0),
-        "idle_timeout_s": _num("idle_timeout_s", 120.0),
-        "max_restarts": int(_num("max_restarts", 3)),
         "label": raw.get("label") or name,
         "experimental": bool(raw.get("experimental", False)),
         "capabilities": raw.get("capabilities") or {},
+    }
+
+    if transport == "tcp":
+        return _validate_tcp_entry(raw, where, common, _num, _str_list)
+
+    from echo_node.adapters.subprocess_adapter import SUPPORTED_SLOTS
+    if slot not in SUPPORTED_SLOTS:
+        raise ExternalProviderError(
+            f"{where}: slot {slot.value!r} cannot be served by a subprocess "
+            f"adapter (supported: "
+            f"{sorted(s.value for s in SUPPORTED_SLOTS)})")
+
+    command = raw.get("command", [])
+    args = raw.get("args", [])
+    if not isinstance(command, list):
+        raise ExternalProviderError(f"{where}: 'command' must be a list, got {type(command).__name__}")
+    if not isinstance(args, list):
+        raise ExternalProviderError(f"{where}: 'args' must be a list, got {type(args).__name__}")
+    argv = resolve_command(command, args, name=name)
+
+    return {
+        **common,
+        "argv": argv,
+        "idle_timeout_s": _num("idle_timeout_s", 120.0),
+        "max_restarts": int(_num("max_restarts", 3)),
+    }
+
+
+def _validate_tcp_entry(
+    raw: dict[str, Any],
+    where: str,
+    common: dict[str, Any],
+    _num: Any,
+    _str_list: Any,
+) -> dict[str, Any]:
+    """Validate a ``transport: tcp`` entry (Wyoming server)."""
+    from echo_node.adapters.wyoming import TCP_SUPPORTED_SLOTS
+
+    slot = common["slot_enum"]
+    name = common["name"]
+    if slot not in TCP_SUPPORTED_SLOTS:
+        raise ExternalProviderError(
+            f"{where}: slot {slot.value!r} cannot be served over Wyoming TCP "
+            f"(supported: {sorted(s.value for s in TCP_SUPPORTED_SLOTS)})")
+
+    command = raw.get("command", [])
+    if command:
+        raise ExternalProviderError(
+            f"{where}: transport 'tcp' takes no 'command' — the adapter only "
+            f"opens a TCP connection to host:port; nothing is spawned")
+    args = raw.get("args", [])
+    if args:
+        raise ExternalProviderError(
+            f"{where}: transport 'tcp' takes no 'args' (there is no command "
+            f"to pass them to)")
+
+    host = raw.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host.strip():
+        raise ExternalProviderError(
+            f"{where}: 'host' must be a non-empty string, got {host!r}")
+
+    port_raw = raw.get("port")
+    if port_raw is None:
+        raise ExternalProviderError(
+            f"{where}: transport 'tcp' requires 'port' (conventional Wyoming "
+            f"ports: faster-whisper 10300, piper 10200, openwakeword 10400)")
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        raise ExternalProviderError(
+            f"{where}: 'port' must be an integer 1-65535, got {port_raw!r}") from None
+    if not 1 <= port <= 65535:
+        raise ExternalProviderError(
+            f"{where}: 'port' must be an integer 1-65535, got {port_raw!r}")
+
+    return {
+        **common,
+        "host": host,
+        "port": port,
+        "connect_timeout_s": _num("connect_timeout_s", 3.0),
+        "chunk_samples": max(1, int(_num("chunk_samples", 1024))),
+        # Optional Wyoming hints, passed through to the protocol events:
+        # stt -> transcribe {name, language}; tts -> synthesize.voice;
+        # wake_word -> detect {names}.
+        "model": raw.get("model"),
+        "language": raw.get("language"),
+        "voice_name": raw.get("voice_name"),
+        "voice_speaker": raw.get("voice_speaker"),
+        "phrase_names": _str_list("phrase_names"),
     }
 
 
@@ -154,6 +260,7 @@ def register_external_providers(
     startup should treat that as fatal.
     """
     from echo_node.adapters.subprocess_adapter import make_external_provider
+    from echo_node.adapters.wyoming import make_wyoming_provider
     from echo_node.slots.registry import get_registry
 
     reg = reg if reg is not None else get_registry()
@@ -173,7 +280,8 @@ def register_external_providers(
             raise ExternalProviderError(
                 f"external provider {name!r} collides with an existing "
                 f"{slot.value} provider — rename it in 'external_providers'")
-        cls = make_external_provider(entry)
+        cls = (make_wyoming_provider(entry) if entry["transport"] == "tcp"
+               else make_external_provider(entry))
         reg.register(slot, name, cls,
                      experimental=entry["experimental"],
                      external=True)

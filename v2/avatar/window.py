@@ -983,7 +983,8 @@ class AvatarWindow(QWidget):
             return
         btn_pos = self.settings_btn.mapToGlobal(self.settings_btn.rect().topLeft())
         self._settings_popup = SettingsPopup(
-            self, self.character_list, self.character, self._frame_state_dict()
+            self, self.character_list, self.character, self._frame_state_dict(),
+            config_path=getattr(self, "config_path", None),
         )
         self._settings_popup.setting_changed.connect(self._on_setting_change)
         self._settings_popup.show_at(btn_pos.x(), btn_pos.y())
@@ -1186,6 +1187,12 @@ class CommandRouter(QObject):
                 if k in ("vad", "rms", "threshold", "boosted_threshold",
                          "rms_floor", "boosted_rms", "state")
             })
+        elif cmd == "external_provider_result":
+            # Assistant's reply to external_provider_save/remove — forward
+            # to the open settings popup (if any) for inline display.
+            popup = getattr(self.window, "_settings_popup", None)
+            if popup is not None and popup.isVisible():
+                popup._on_external_result(payload)
         elif cmd == "quit":
             try:
                 os.unlink(AVATAR_FIFO)
@@ -1511,6 +1518,8 @@ def _demo_cues(duration: float = 3.5) -> list[dict]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--character", default=None)
+    parser.add_argument("--config", default=None,
+                        help="assistant config.yaml path (External settings tab)")
     parser.add_argument("--demo", action="store_true")
     args = parser.parse_args()
 
@@ -1522,6 +1531,7 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
 
     window = AvatarWindow(base / "frames", manifest, default_character)
+    window.config_path = args.config  # read by SettingsPopup (External tab)
     window.show()
 
     # Set backend options on the SettingsPopup class so all future

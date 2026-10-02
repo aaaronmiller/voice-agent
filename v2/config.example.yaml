@@ -23,6 +23,11 @@ assistant:
 
 audio:
   backend: alsa
+  # Phase C: WebRTC AEC3 mic capture is registered as audio_io/aec-webrtc
+  # (pip install pywebrtc-audio; experimental, ECHO_INCLUDE_EXPERIMENTAL=1),
+  # but the orchestrator still constructs MicStream directly — full
+  # AecAudioIO wiring (incl. feed_far_end() from the playback path) is
+  # follow-up work, so there is no backend: value for it yet.
   sample_rate: 16000
   chunk_size: 1280
   arecord_device: default
@@ -39,6 +44,8 @@ wake_word:
 
 vad:
   provider: openwakeword  # label only; the VAD is OpenWakeWord's VAD + RMS floor
+  # Phase C alternative: provider: silero  # real Silero v6 (pip install silero-vad);
+  #   experimental (ECHO_INCLUDE_EXPERIMENTAL=1), unverified on hardware.
   speech_threshold: 0.48
   silence_seconds: 0.85
   max_record_seconds: 18
@@ -89,6 +96,9 @@ llm:
 tts:
   # Provider: kokoro (default, low-latency ONNX), dots (GPU, expressive),
   # cosyvoice3 (GPU, higher quality + zero-shot cloning; experimental), espeak-ng (CPU fallback).
+  # Phase C tiers (experimental, ECHO_INCLUDE_EXPERIMENTAL=1, GPU + hardware validation needed):
+  #   qwen3-tts  (Qwen3-TTS-0.6B, streaming, Apache-2.0; pip install qwen-tts)
+  #   voxcpn     (VoxCPM-0.5B, expressive prosody, Apache-2.0; pip install voxcpm)
   provider: kokoro
   voice: af_heart
   speed: 1.0
@@ -104,10 +114,25 @@ tts:
   # prompt_text: "transcript of the reference audio"
   # instruction: "speak cheerfully"
   # language: en
+  # Qwen3-TTS options (only used when provider: qwen3-tts; experimental):
+  # model_id: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice  # or a local dir; Base variant for cloning
+  # voice: Ryan        # CustomVoice speaker name (see model.get_supported_speakers())
+  # language: English
+  # instruct: ""        # optional speaking-style instruction
+  # device_map: cuda:0
+  # dtype: bfloat16
+  # VoxCPM options (only used when provider: voxcpn; experimental):
+  # model_id: openbmb/VoxCPM       # 0.5B HF id UNVERIFIED — override if wrong
+  # cfg_value: 2.0
+  # inference_timesteps: 10
+  # reference_wav_path: path/to/voice.wav   # optional voice cloning
+  # prompt_wav_path: path/to/ref.wav        # optional ultimate cloning
+  # prompt_text: "transcript of the prompt"
 
 # Response-generation backend — the agent that answers. Valid providers:
 # hermes (default, local tool-use server), pi, claude, codex, openai, openrouter.
 # gemini_live and openai_realtime are experimental (voice-native, unverified here).
+# llama-swap is experimental (local model router, unverified here).
 backend:
   provider: hermes
 
@@ -124,6 +149,18 @@ hermes:
   api_key: ""         # or set HERMES_API_KEY env var
   timeout_seconds: 90
 
+# llama-swap local model router (Phase C, experimental) — talks to
+# llama-swap's OpenAI-compatible chat-completions endpoint; hot-swaps
+# local llama-server models on demand. Select with:
+#   backend:
+#     provider: llama-swap
+# (gated behind ECHO_INCLUDE_EXPERIMENTAL=1 in the settings UI).
+llama_swap:
+  base_url: http://127.0.0.1:8080
+  model: ""            # model id as listed by GET {base_url}/v1/models
+  api_key: ""          # or set LLAMA_SWAP_API_KEY env var (usually unneeded)
+  timeout_seconds: 90
+
 # Pi agent native integration — runs pi as subprocess.
 pi_agent:
   command: ["pi", "-p"]
@@ -138,6 +175,11 @@ avatar:
   recognizer: phonetic          # rhubarb recognizer: phonetic (fast) or pocketSphinx
   extended_shapes: GH           # optional extra mouth shapes
   rhubarb_path: null            # null = auto-detect
+  # Phase C: a LiveTalking-style harness around the MuseTalk prototype is
+  # registered as avatar/musetalk-livetalking (experimental,
+  # ECHO_INCLUDE_EXPERIMENTAL=1; needs CUDA + models/manifest.json + face photo).
+  # It is not wired into the pipeline's avatar path yet (that still uses the
+  # rhubarb controller above) — Phase D work.
 
 # ── External providers (Phase B) ──────────────────────────────────────
 # Any program speaking the JSON-RPC 2.0 adapter protocol on stdio can take
@@ -172,9 +214,43 @@ avatar:
 #     label: "My agent (external)"
 #     experimental: true
 #
+#   # Wyoming TCP adapters (Phase D): any Wyoming-protocol server on the
+#   # network can take a slot — no `command:` is spawned; the adapter only
+#   # opens a TCP connection per request. Conventional ports are the
+#   # projects' documented defaults (confirm against the server you run):
+#   # wyoming-faster-whisper 10300 (stt), wyoming-piper 10200 (tts),
+#   # wyoming-openwakeword 10400 (wake_word). `host` defaults to 127.0.0.1.
+#   - slot: stt
+#     name: wy-faster-whisper
+#     transport: tcp
+#     port: 10300
+#     model: tiny-int8     # optional: sent as `name` in the `transcribe` event
+#     language: en         # optional: sent as `language`
+#     label: "faster-whisper (wyoming)"
+#     request_timeout_s: 60.0
+#
+#   - slot: tts
+#     name: wy-piper
+#     transport: tcp
+#     port: 10200
+#     voice_name: en_US-amy-medium   # optional: `voice: {name}` in `synthesize`
+#     # voice_speaker: ...          # optional: rides along with voice_name
+#     label: "Piper (wyoming)"
+#
+#   - slot: wake_word
+#     name: wy-openwakeword
+#     transport: tcp
+#     port: 10400
+#     phrase_names: ["hey_jarvis"]  # optional: `names` in the `detect` event
+#     label: "openWakeWord (wyoming)"
+#
 # Rules: `name` must be unique per slot (collisions with built-ins are a
-# startup error); `slot` must be one of stt, tts, vad, wake_word,
-# agent_backend (avatar/audio_io/barge_in are not subprocess-servable in
-# Phase B); `command[0]` may be `builtin:<file>` only for the shipped
-# adapters in echo_node/adapters/ (no "..", no separators, exact name).
+# startup error); `transport` is `subprocess` (default) or `tcp`.
+# Subprocess entries: `slot` must be one of stt, tts, vad, wake_word,
+# agent_backend (avatar/audio_io/barge_in are not subprocess-servable);
+# `command[0]` may be `builtin:<file>` only for the shipped adapters in
+# echo_node/adapters/ (no "..", no separators, exact name).
+# TCP entries: `slot` must be one of stt, tts, wake_word (the Wyoming
+# protocol has no per-chunk VAD query); `host` (default 127.0.0.1) and
+# `port` (required) select the server; `command`/`args` are forbidden.
 # Any schema violation fails startup with a plain message.

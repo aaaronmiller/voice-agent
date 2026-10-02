@@ -22,6 +22,8 @@ from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -30,6 +32,10 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -44,23 +50,53 @@ PROFILES_DIR = Path(__file__).resolve().parent.parent / "profiles"
 PROFILES_DIR.mkdir(exist_ok=True)
 
 
-def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[str, str]]:
+def _registry_provider_names(slot_name: str, fallback: list[str]) -> list[tuple[str, str, bool | None, str]]:
     """Dropdown options from the slot registry: validated providers only.
 
-    Returns ``(config_key, display_label)`` pairs; external (subprocess)
-    providers get an " (external)" suffix on the label so users can tell
-    them apart from built-ins. Falls back to the hardcoded list if the
-    registry can't be consulted (e.g. echo_node not importable here).
+    Returns ``(config_key, display_label, valid, reason)`` tuples; external
+    (subprocess) providers get an " (external)" suffix on the label so users
+    can tell them apart from built-ins. ``valid``/``reason`` come from the
+    cached ``last_validation`` (populated by ``working()`` below, falling
+    back to a live ``validate()`` when nothing is cached) so the UI can
+    show ✓/✗ marks with the reason as tooltip. ``valid`` is None for the
+    hardcoded fallback entries, which carry no validation info.
+
+    NOTE: this popup runs in the avatar sidecar process, which has its own
+    registry instance — validation results here reflect *this* process
+    (same as the existing dropdown population, which already validated
+    here). External providers are mirrored into the sidecar registry from
+    config.yaml by ``SettingsPopup._sync_external_registry`` at popup
+    construction.
     """
     try:
         from echo_node.slots import SlotType
         from echo_node.slots.registry import get_registry
         slot = SlotType(slot_name)
-        pairs = [(i.name, i.name + (" (external)" if i.external else ""))
-                 for i in get_registry().working(slot)]
-        return pairs or [(n, n) for n in fallback]
+        reg = get_registry()
+        infos = reg.working(slot)
+        pairs = []
+        for i in infos:
+            res = i.last_validation or i.validate()
+            pairs.append((i.name, i.name + (" (external)" if i.external else ""),
+                          res.ok, res.reason))
+        return pairs or [(n, n, None, "") for n in fallback]
     except Exception:
-        return [(n, n) for n in fallback]
+        return [(n, n, None, "") for n in fallback]
+
+
+def _valid_mark(valid: bool | None) -> str:
+    """✓/✗ prefix for dropdown labels ("" when validation is unknown)."""
+    if valid is True:
+        return "\u2713 "
+    if valid is False:
+        return "\u2717 "
+    return ""
+
+
+# (slot, name) pairs this sidecar process registered from config.yaml's
+# external_providers:. Tracked so each new popup can unregister the stale
+# set before re-registering the current file contents.
+_EXTERNAL_SYNCED: list[tuple[Any, str]] = []
 
 
 # ── Styling ──────────────────────────────────────────────────────
@@ -98,7 +134,8 @@ class SettingsPopup(QFrame):
     _backend_default: str = "hermes"
 
     def __init__(self, parent: QWidget, character_list: list[str],
-                 current_char: str, frame_state: dict[str, Any]):
+                 current_char: str, frame_state: dict[str, Any],
+                 config_path: str | None = None):
         super().__init__(parent)
         self.setObjectName("settingsFrame")
         self.setWindowFlags(
@@ -119,6 +156,13 @@ class SettingsPopup(QFrame):
                 "glow_intensity": 50, "pulse_speed": 3.0, "pulse_amplitude": 30,
             }.get(k, 0))
 
+        # Config path (sidecar argv --config): source of truth for the
+        # External tab. The sidecar registry is synced from it below so the
+        # Agent/Display dropdowns see external providers too.
+        self._config_path = config_path
+        self._ext_sync_error: str | None = self._sync_external_registry()
+        SettingsPopup._backend_options = self._registry_backend_options()
+
         # Build UI
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -134,7 +178,10 @@ class SettingsPopup(QFrame):
         self.tabs.addTab(self._build_display_tab(character_list, current_char), "Display")
         self.tabs.addTab(self._build_agent_tab(), "Agent")
         self.tabs.addTab(self._build_cloud_tab(), "Cloud")
+        self._external_tab = self._build_external_tab()
+        self.tabs.addTab(self._external_tab, "External")
         self.tabs.addTab(self._build_profiles_tab(), "Presets")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         layout.addWidget(self.tabs, stretch=1)
         self.setLayout(layout)
@@ -232,8 +279,7 @@ class SettingsPopup(QFrame):
         be_row.addWidget(be_lbl)
         self.backend_combo = QComboBox()
         self.backend_combo.setMinimumWidth(160)
-        for key, label, gly in SettingsPopup._backend_options:
-            self.backend_combo.addItem(f"{gly}  {label}", key)
+        self._populate_backend_combo()
         self.backend_combo.currentIndexChanged.connect(self._on_backend)
         be_row.addWidget(self.backend_combo, stretch=1)
         self.backend_status = QLabel(); self.backend_status.setFixedWidth(20)
@@ -297,8 +343,6 @@ class SettingsPopup(QFrame):
         gb2 = QGroupBox("STT")
         f2 = QFormLayout(gb2); f2.setSpacing(3); f2.setContentsMargins(8, 16, 8, 8)
         self._stt_provider = QComboBox()
-        for key, label in _registry_provider_names("stt", ["faster-whisper", "parakeet"]):
-            self._stt_provider.addItem(label, key)
         self._stt_provider.currentIndexChanged.connect(
             lambda _i: self._emit("config", section="stt", key="provider",
                                  value=self._stt_provider.currentData()))
@@ -316,8 +360,6 @@ class SettingsPopup(QFrame):
         gb3 = QGroupBox("TTS")
         f3 = QFormLayout(gb3); f3.setSpacing(3); f3.setContentsMargins(8, 16, 8, 8)
         self._tts_provider = QComboBox()
-        for key, label in _registry_provider_names("tts", ["kokoro", "dots", "espeak-ng"]):
-            self._tts_provider.addItem(label, key)
         self._tts_provider.currentIndexChanged.connect(
             lambda _i: self._emit("config", section="tts", key="provider",
                                  value=self._tts_provider.currentData()))
@@ -336,6 +378,19 @@ class SettingsPopup(QFrame):
             lambda v: self._emit("config", section="assistant", key="wake_phrase", value=v))
         f4.addRow("Phrase:", self._wake_phrase)
         lo.addWidget(gb4)
+
+        # Populate the registry-driven dropdowns (after all combos exist)
+        self._populate_provider_combos()
+
+        # ── Validation ──
+        vr = QHBoxLayout(); vr.setSpacing(6)
+        recheck_btn = QPushButton("Re-check providers")
+        recheck_btn.clicked.connect(self._recheck_providers)
+        vr.addWidget(recheck_btn)
+        self._agent_recheck_status = QLabel("")
+        self._agent_recheck_status.setWordWrap(True)
+        vr.addWidget(self._agent_recheck_status, stretch=1)
+        lo.addLayout(vr)
 
         lo.addStretch()
         return tab
@@ -437,6 +492,342 @@ class SettingsPopup(QFrame):
 
         lo.addStretch()
         return tab
+
+    # ═══════════════════════════════════════════════════════════════
+    #  Tab: External providers (config.yaml external_providers:)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _on_tab_changed(self, idx: int) -> None:
+        if self.tabs.widget(idx) is getattr(self, "_external_tab", None):
+            self._refresh_external_list()
+
+    def _sync_external_registry(self) -> str | None:
+        """Mirror config.yaml's ``external_providers:`` into this process's registry.
+
+        The popup (and its Agent/Display dropdowns) runs in the avatar
+        sidecar process, which has its own registry instance — the
+        assistant's live registry is a different object. Re-registering
+        here keeps the sidecar's dropdowns and validation dots honest.
+        Returns an error string, or None on success. Never raises.
+        """
+        global _EXTERNAL_SYNCED
+        try:
+            from echo_node.slots.registry import get_registry
+            reg = get_registry()
+        except Exception as exc:
+            return f"registry unavailable: {exc}"
+        for slot, name in _EXTERNAL_SYNCED:
+            try:
+                reg.unregister(slot, name)
+            except Exception:
+                pass
+        _EXTERNAL_SYNCED = []
+        if not self._config_path:
+            return None  # sidecar started without --config: nothing to mirror
+        entries, err = self._load_external_entries()
+        if err:
+            return err
+        try:
+            from echo_node.adapters import (
+                ExternalProviderError,
+                register_external_providers,
+            )
+            from echo_node.slots import SlotType
+            names = register_external_providers(
+                {"external_providers": entries}, reg)
+        except ExternalProviderError as exc:
+            return str(exc)
+        except Exception as exc:
+            return f"registry sync failed: {exc}"
+        for dotted in names:
+            s, _, n = dotted.partition("/")
+            try:
+                _EXTERNAL_SYNCED.append((SlotType(s), n))
+            except ValueError:
+                pass
+        return None
+
+    def _load_external_entries(self) -> tuple[list[dict[str, Any]], str | None]:
+        """Read config.yaml's ``external_providers:`` — (entries, error).
+
+        The config file is the source of truth; this never raises.
+        """
+        if not self._config_path:
+            return [], "no config path (sidecar started without --config)"
+        try:
+            import yaml
+            cfg = yaml.safe_load(
+                Path(self._config_path).read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            return [], f"cannot read config.yaml: {exc}"
+        entries = cfg.get("external_providers") or []
+        if not isinstance(entries, list):
+            return [], "'external_providers' must be a list"
+        return [e for e in entries if isinstance(e, dict)], None
+
+    @staticmethod
+    def _registry_backend_options() -> list[tuple[str, str, str]]:
+        """Rebuild backend (key, label, glyph) options from the sidecar registry.
+
+        Same population rule as ``echo_node.backends._build_backend_options``
+        (validated, non-experimental, " (external)" suffix for externals),
+        run after ``_sync_external_registry`` so external backends appear.
+        Glyphs are preserved from the previously-set options where known.
+        """
+        previous = list(SettingsPopup._backend_options)
+        try:
+            from echo_node.slots import SlotType
+            from echo_node.slots.registry import get_registry
+            reg = get_registry()
+            working = reg.working(SlotType.AGENT_BACKEND)
+            if not working:
+                working = [i for i in reg.all_providers(SlotType.AGENT_BACKEND)
+                           if not i.experimental]
+            glyphs = {k: g for k, _l, g in previous}
+            out = []
+            for i in working:
+                label = getattr(i.provider_cls, "name", None) or i.name
+                if i.external:
+                    label += " (external)"
+                out.append((i.name, label, glyphs.get(i.name, "")))
+            return out or previous
+        except Exception:
+            return previous
+
+    def _populate_provider_combos(self) -> None:
+        """(Re)build the STT/TTS dropdowns from the registry, keeping selection."""
+        for combo, slot_name, fallback in (
+            (self._stt_provider, "stt", ["faster-whisper", "parakeet"]),
+            (self._tts_provider, "tts", ["kokoro", "dots", "espeak-ng"]),
+        ):
+            current = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for key, label, valid, reason in _registry_provider_names(slot_name, fallback):
+                combo.addItem(_valid_mark(valid) + label, key)
+                if reason:
+                    combo.setItemData(combo.count() - 1, reason,
+                                      Qt.ItemDataRole.ToolTipRole)
+            if current is not None:
+                idx = combo.findData(current)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
+
+    def _populate_backend_combo(self) -> None:
+        """(Re)build the Display-tab backend combo with ✓/✗ validation marks."""
+        current = self.backend_combo.currentData()
+        try:
+            from echo_node.slots import SlotType
+            from echo_node.slots.registry import get_registry
+            reg = get_registry()
+            marks: dict[str, tuple[bool | None, str]] = {}
+            for i in reg.all_providers(SlotType.AGENT_BACKEND):
+                res = i.last_validation or i.validate()
+                marks[i.name] = (res.ok, res.reason)
+        except Exception:
+            marks = {}
+        self.backend_combo.blockSignals(True)
+        self.backend_combo.clear()
+        for key, label, gly in SettingsPopup._backend_options:
+            valid, reason = marks.get(key, (None, ""))
+            self.backend_combo.addItem(f"{_valid_mark(valid)}{gly}  {label}", key)
+            if reason:
+                self.backend_combo.setItemData(self.backend_combo.count() - 1, reason,
+                                              Qt.ItemDataRole.ToolTipRole)
+        if current is not None:
+            idx = self.backend_combo.findData(current)
+            if idx >= 0:
+                self.backend_combo.setCurrentIndex(idx)
+        self.backend_combo.blockSignals(False)
+
+    def _recheck_providers(self) -> None:
+        """Re-run all validators and rebuild the provider dropdowns."""
+        try:
+            from echo_node.slots.registry import get_registry
+            get_registry().refresh()
+            self._populate_provider_combos()
+            self._populate_backend_combo()
+            self._agent_recheck_status.setText("re-checked just now")
+            self._agent_recheck_status.setStyleSheet("color: #4c4;")
+        except Exception as exc:
+            self._agent_recheck_status.setText(f"re-check failed: {exc}")
+            self._agent_recheck_status.setStyleSheet("color: #c44;")
+
+    def _build_external_tab(self) -> QWidget:
+        tab = QWidget()
+        lo = QVBoxLayout(tab)
+        lo.setContentsMargins(0, 4, 0, 0)
+        lo.setSpacing(4)
+
+        trust = QLabel(
+            "External programs run with your user privileges \u2014 "
+            "only add software you trust.")
+        trust.setWordWrap(True)
+        lo.addWidget(trust)
+
+        self._ext_list = QListWidget()
+        self._ext_list.itemDoubleClicked.connect(lambda _i: self._on_ext_edit())
+        lo.addWidget(self._ext_list, stretch=1)
+
+        self._ext_status = QLabel("")
+        self._ext_status.setWordWrap(True)
+        lo.addWidget(self._ext_status)
+
+        br = QHBoxLayout(); br.setSpacing(4)
+        add_btn = QPushButton("Add"); add_btn.clicked.connect(self._on_ext_add)
+        edit_btn = QPushButton("Edit"); edit_btn.clicked.connect(self._on_ext_edit)
+        del_btn = QPushButton("Remove"); del_btn.clicked.connect(self._on_ext_remove)
+        test_btn = QPushButton("Test"); test_btn.clicked.connect(self._on_ext_test)
+        recheck_btn = QPushButton("Re-check all")
+        recheck_btn.clicked.connect(self._on_ext_recheck)
+        for b in (add_btn, edit_btn, del_btn, test_btn, recheck_btn):
+            br.addWidget(b)
+        lo.addLayout(br)
+
+        lo.addStretch()
+        self._refresh_external_list()
+        return tab
+
+    def _set_ext_status(self, text: str, ok: bool | None) -> None:
+        self._ext_status.setText(text)
+        color = "#4c4" if ok else ("#c44" if ok is False else "#aab")
+        self._ext_status.setStyleSheet(f"color: {color};")
+
+    @staticmethod
+    def _entry_argv_summary(e: dict[str, Any]) -> str:
+        from echo_node.adapters.ui_helpers import summarize_command
+        try:
+            from echo_node.adapters import resolve_command
+            argv = resolve_command(e.get("command") or [], e.get("args") or [],
+                                   name=str(e.get("name", "?")))
+        except Exception:
+            argv = ([str(c) for c in (e.get("command") or [])]
+                    + [str(a) for a in (e.get("args") or [])])
+        return summarize_command(argv)
+
+    def _external_status(self, slot: str, name: str) -> tuple[bool | None, str]:
+        """(ok, reason) for one entry, from this process's registry."""
+        try:
+            from echo_node.slots import SlotType
+            from echo_node.slots.registry import get_registry
+            info = get_registry().info(SlotType(slot), name)
+        except Exception as exc:
+            return None, f"not in this process's registry: {exc}"
+        try:
+            res = info.last_validation or info.validate()
+            return res.ok, res.reason
+        except Exception as exc:
+            return False, f"validator crashed: {exc}"
+
+    def _refresh_external_list(self) -> None:
+        self._ext_list.clear()
+        entries, err = self._load_external_entries()
+        if err:
+            self._set_ext_status(err, ok=False)
+            return
+        if self._ext_sync_error:
+            self._set_ext_status(f"registry sync: {self._ext_sync_error}", ok=False)
+        else:
+            self._set_ext_status(
+                f"{len(entries)} external provider(s) in config.yaml", ok=True)
+        for e in entries:
+            name = str(e.get("name", "?"))
+            slot = str(e.get("slot", "?"))
+            ok, reason = self._external_status(slot, name)
+            color = "#4c4" if ok else ("#c44" if ok is False else "#889")
+            item = QListWidgetItem(
+                f"\u25cf  {name}  [{slot}]  \u2014  {self._entry_argv_summary(e)}")
+            item.setForeground(QColor(color))
+            item.setToolTip(reason or "no validation info yet")
+            item.setData(Qt.ItemDataRole.UserRole, e)
+            self._ext_list.addItem(item)
+
+    def _selected_external_entry(self) -> dict[str, Any] | None:
+        item = self._ext_list.currentItem()
+        if item is None:
+            return None
+        e = item.data(Qt.ItemDataRole.UserRole)
+        return e if isinstance(e, dict) else None
+
+    def _on_ext_add(self) -> None:
+        dlg = ExternalProviderDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            entry = dlg.get_entry()
+            self._set_ext_status(f"saving {entry['name']}\u2026", ok=None)
+            self._emit("external_provider_save", entry=entry)
+
+    def _on_ext_edit(self) -> None:
+        e = self._selected_external_entry()
+        if e is None:
+            return
+        dlg = ExternalProviderDialog(self, entry=e)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            entry = dlg.get_entry()
+            self._set_ext_status(f"saving {entry['name']}\u2026", ok=None)
+            self._emit("external_provider_save", entry=entry)
+
+    def _on_ext_remove(self) -> None:
+        e = self._selected_external_entry()
+        if e is None:
+            return
+        name, slot = str(e.get("name", "?")), str(e.get("slot", "?"))
+        ans = QMessageBox.question(
+            self, "Remove external provider",
+            f"Remove external provider {name!r} [{slot}]?\n\n"
+            "This deletes it from config.yaml's external_providers: and "
+            "unregisters it immediately.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if ans == QMessageBox.StandardButton.Yes:
+            self._set_ext_status(f"removing {name}\u2026", ok=None)
+            self._emit("external_provider_remove", slot=slot, name=name)
+
+    def _on_ext_test(self) -> None:
+        e = self._selected_external_entry()
+        if e is None:
+            return
+        name, slot = str(e.get("name", "?")), str(e.get("slot", "?"))
+        try:
+            from echo_node.slots import SlotType
+            from echo_node.slots.registry import get_registry
+            info = get_registry().info(SlotType(slot), name)
+            info.last_validation = None
+            res = info.validate()
+            self._set_ext_status(
+                f"{name}: {'\u2713' if res.ok else '\u2717'} {res.reason}", ok=res.ok)
+        except Exception as exc:
+            self._set_ext_status(f"{name}: test failed: {exc}", ok=False)
+        self._refresh_external_list()
+
+    def _on_ext_recheck(self) -> None:
+        try:
+            from echo_node.slots.registry import get_registry
+            reg = get_registry()
+            for slot, name in _EXTERNAL_SYNCED:
+                reg.refresh(slot, name)
+            self._set_ext_status("re-checked all external providers", ok=True)
+        except Exception as exc:
+            self._set_ext_status(f"re-check failed: {exc}", ok=False)
+        self._refresh_external_list()
+
+    def _on_external_result(self, payload: dict[str, Any]) -> None:
+        """Handle the assistant's reply to external_provider_save/remove.
+
+        Called by avatar.window.CommandRouter when the assistant sends
+        ``{"cmd": "external_provider_result", ...}`` back over stdin.
+        """
+        ok = bool(payload.get("ok", False))
+        message = str(payload.get("message", ""))
+        # Re-mirror config.yaml into this process's registry, then refresh
+        # every surface that shows providers.
+        self._ext_sync_error = self._sync_external_registry()
+        self._refresh_external_list()
+        self._populate_provider_combos()
+        self._populate_backend_combo()
+        self._set_ext_status(message, ok=ok)
+        if not ok:
+            QMessageBox.warning(self, "External provider", message)
 
     # ── Profile helpers ──────────────────────────────────────────
 
@@ -750,3 +1141,199 @@ class SettingsPopup(QFrame):
         SettingsPopup._backend_options = options
         if options:
             SettingsPopup._backend_default = options[0][0]
+
+
+# ── External provider Add/Edit dialog ─────────────────────────────
+
+class ExternalProviderDialog(QDialog):
+    """Add/Edit dialog for one config.yaml ``external_providers:`` entry.
+
+    The entry dict is built with the Qt-free
+    ``echo_node.adapters.ui_helpers`` (same schema ``_validate_entry``
+    accepts). The Test button runs the exact validation the registry
+    would — ``make_external_provider`` + ``validate()`` — before anything
+    is saved. Saving itself is the popup's job: it emits
+    ``external_provider_save`` and the assistant persists to config.yaml.
+    """
+
+    def __init__(self, parent: QWidget, entry: dict[str, Any] | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit external provider" if entry else "Add external provider")
+        self.setMinimumWidth(440)
+
+        lo = QVBoxLayout(self)
+        lo.setSpacing(4)
+        f = QFormLayout(); f.setSpacing(4)
+
+        # Slot — only slots the subprocess protocol supports
+        self.slot_combo = QComboBox()
+        try:
+            from echo_node.adapters.subprocess_adapter import SUPPORTED_SLOTS
+            for s in sorted(s.value for s in SUPPORTED_SLOTS):
+                self.slot_combo.addItem(s)
+        except Exception:
+            for s in ["stt", "tts", "vad", "wake_word", "agent_backend"]:
+                self.slot_combo.addItem(s)
+        f.addRow("Slot:", self.slot_combo)
+
+        # Name + inline validation
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g. whispercpp")
+        self.name_edit.textChanged.connect(self._check_name)
+        self.name_error = QLabel("")
+        self.name_error.setStyleSheet("color: #c44;")
+        f.addRow("Name:", self.name_edit)
+        f.addRow("", self.name_error)
+
+        # Repo adapter quick-pick
+        self.builtin_combo = QComboBox()
+        self.builtin_combo.addItem("Custom command\u2026", None)
+        try:
+            from echo_node.adapters import BUILTIN_ADAPTERS
+            for b in sorted(BUILTIN_ADAPTERS):
+                self.builtin_combo.addItem(f"repo: {b}", f"builtin:{b}")
+        except Exception:
+            pass
+        self.builtin_combo.currentIndexChanged.connect(self._on_builtin_pick)
+        f.addRow("Adapter:", self.builtin_combo)
+
+        # Command argv, one element per line
+        self.command_edit = QPlainTextEdit()
+        self.command_edit.setFixedHeight(72)
+        self.command_edit.setPlaceholderText(
+            "Command argv, one element per line:\n"
+            "builtin:stt_whispercpp.py\nor\n"
+            "/usr/local/bin/my-stt\n--model\n/path/to/model.bin")
+        f.addRow("Command:", self.command_edit)
+
+        # Extra args, one per line
+        self.args_edit = QPlainTextEdit()
+        self.args_edit.setFixedHeight(48)
+        self.args_edit.setPlaceholderText("Extra args, one per line (optional)")
+        f.addRow("Args:", self.args_edit)
+        lo.addLayout(f)
+
+        # Numeric options
+        nr = QHBoxLayout(); nr.setSpacing(8)
+        self.proto_spin = QSpinBox(); self.proto_spin.setRange(1, 99)
+        self.proto_spin.setValue(1); self.proto_spin.setPrefix("v")
+        nr.addWidget(QLabel("Protocol:")); nr.addWidget(self.proto_spin)
+        self.req_spin = QSpinBox(); self.req_spin.setRange(1, 3600)
+        self.req_spin.setValue(30); self.req_spin.setSuffix(" s")
+        nr.addWidget(QLabel("Request timeout:")); nr.addWidget(self.req_spin)
+        lo.addLayout(nr)
+
+        nr2 = QHBoxLayout(); nr2.setSpacing(8)
+        self.idle_spin = QSpinBox(); self.idle_spin.setRange(5, 86400)
+        self.idle_spin.setValue(120); self.idle_spin.setSuffix(" s")
+        nr2.addWidget(QLabel("Idle timeout:")); nr2.addWidget(self.idle_spin)
+        self.restart_spin = QSpinBox(); self.restart_spin.setRange(0, 100)
+        self.restart_spin.setValue(3)
+        nr2.addWidget(QLabel("Max restarts:")); nr2.addWidget(self.restart_spin)
+        nr2.addStretch()
+        lo.addLayout(nr2)
+
+        self.experimental_check = QCheckBox(
+            "Experimental (hidden from dropdowns unless ECHO_INCLUDE_EXPERIMENTAL=1)")
+        lo.addWidget(self.experimental_check)
+
+        # Test row
+        test_row = QHBoxLayout(); test_row.setSpacing(6)
+        test_btn = QPushButton("Test")
+        test_btn.clicked.connect(self._on_test)
+        test_row.addWidget(test_btn)
+        self._test_result = QLabel("")
+        self._test_result.setWordWrap(True)
+        test_row.addWidget(self._test_result, stretch=1)
+        lo.addLayout(test_row)
+
+        bbox = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        bbox.accepted.connect(self._on_accept)
+        bbox.rejected.connect(self.reject)
+        lo.addWidget(bbox)
+
+        if entry:
+            self._prefill(entry)
+
+    # ── internals ──────────────────────────────────────────────
+
+    def _prefill(self, entry: dict[str, Any]) -> None:
+        from echo_node.adapters.ui_helpers import format_args_text
+        i = self.slot_combo.findText(str(entry.get("slot", "")))
+        if i >= 0:
+            self.slot_combo.setCurrentIndex(i)
+        self.name_edit.setText(str(entry.get("name", "")))
+        self.command_edit.setPlainText(format_args_text(entry.get("command") or []))
+        self.args_edit.setPlainText(format_args_text(entry.get("args") or []))
+        cmd0 = (entry.get("command") or [None])[0]
+        if isinstance(cmd0, str) and cmd0.startswith("builtin:"):
+            i = self.builtin_combo.findData(cmd0)
+            if i >= 0:
+                self.builtin_combo.setCurrentIndex(i)
+        try:
+            self.proto_spin.setValue(int(entry.get("protocol_version", 1)))
+            self.req_spin.setValue(int(float(entry.get("request_timeout_s", 30))))
+            self.idle_spin.setValue(int(float(entry.get("idle_timeout_s", 120))))
+            self.restart_spin.setValue(int(entry.get("max_restarts", 3)))
+        except (TypeError, ValueError):
+            pass
+        self.experimental_check.setChecked(bool(entry.get("experimental", False)))
+
+    def _check_name(self, text: str) -> None:
+        from echo_node.adapters.ui_helpers import validate_name
+        err = validate_name(text.strip())
+        self.name_error.setText(err or "")
+
+    def _on_builtin_pick(self, idx: int) -> None:
+        builtin = self.builtin_combo.itemData(idx)
+        if builtin:
+            self.command_edit.setPlainText(builtin)
+
+    def _on_accept(self) -> None:
+        from echo_node.adapters.ui_helpers import parse_args_text, validate_name
+        name = self.name_edit.text().strip()
+        err = validate_name(name)
+        if err:
+            self.name_error.setText(err)
+            return
+        if not parse_args_text(self.command_edit.toPlainText()):
+            self.name_error.setText("command must be a non-empty argv list")
+            return
+        self.accept()
+
+    def _on_test(self) -> None:
+        from PyQt6.QtWidgets import QApplication
+        self._test_result.setText("testing\u2026")
+        self._test_result.setStyleSheet("color: #aab;")
+        QApplication.processEvents()
+        try:
+            from echo_node.adapters import _validate_entry
+            from echo_node.adapters.subprocess_adapter import make_external_provider
+            norm = _validate_entry(self.get_entry(), 0)
+            cls = make_external_provider(norm)
+            res = cls.validate()
+        except Exception as exc:
+            self._test_result.setText(f"\u2717 {exc}")
+            self._test_result.setStyleSheet("color: #c44;")
+            return
+        mark = "\u2713" if res.ok else "\u2717"
+        self._test_result.setText(f"{mark} {res.reason}")
+        self._test_result.setStyleSheet(
+            f"color: {'#4c4' if res.ok else '#c44'};")
+        self._test_result.setToolTip(res.reason)
+
+    def get_entry(self) -> dict[str, Any]:
+        """Build the config-shaped entry dict from the dialog fields."""
+        from echo_node.adapters.ui_helpers import build_entry_dict, parse_args_text
+        return build_entry_dict(
+            slot=self.slot_combo.currentText(),
+            name=self.name_edit.text().strip(),
+            command=parse_args_text(self.command_edit.toPlainText()),
+            args=parse_args_text(self.args_edit.toPlainText()),
+            protocol_version=self.proto_spin.value(),
+            request_timeout_s=float(self.req_spin.value()),
+            idle_timeout_s=float(self.idle_spin.value()),
+            max_restarts=self.restart_spin.value(),
+            experimental=self.experimental_check.isChecked(),
+        )

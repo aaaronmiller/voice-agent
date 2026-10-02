@@ -91,6 +91,9 @@ class AvatarController(AvatarRenderer):
         self.rhubarb_path = _resolve_rhubarb(config.get("rhubarb_path"))
         self.python_executable = sys.executable
         self.process: subprocess.Popen | None = None
+        # Assistant's config.yaml path — passed to the sidecar as --config
+        # so the settings popup's External tab can read external_providers:.
+        self.config_path = config.get("config_path")
         self._lock = threading.Lock()
         self._pending: dict | None = None
 
@@ -129,6 +132,8 @@ class AvatarController(AvatarRenderer):
             "--character",
             self.character,
         ]
+        if self.config_path:
+            cmd += ["--config", str(self.config_path)]
         env = dict(os.environ)
         env.setdefault("QT_QPA_PLATFORM", "wayland;xcb")
         env.setdefault("PYTHONUNBUFFERED", "1")
