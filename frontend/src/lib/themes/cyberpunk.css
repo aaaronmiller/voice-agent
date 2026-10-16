@@ -1,0 +1,63 @@
+/* Cyberpunk Theme for Echo-Node */
+/* Neon, futuristic, high-contrast */
+
+:root[data-theme="cyberpunk"] {
+  /* Colors */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --text-primary: #e0e0e0;
+  --text-secondary: #8888aa;
+  --accent: #00ff88;
+  --accent-hover: #00cc6a;
+  --border: #333355;
+  
+  /* Neon accent colors */
+  --neon-pink: #ff00ff;
+  --neon-blue: #00ffff;
+  --neon-green: #00ff88;
+  --neon-yellow: #ffff00;
+  
+  /* State colors (neon variants) */
+  --state-dormant: #666688;
+  --state-triggered: #ffaa00;
+  --state-listening: #00ff88;
+  --state-processing: #00ccff;
+  --state-speaking: #ff00ff;
+  
+  /* Effects */
+  --glow-sm: 0 0 5px var(--accent);
+  --glow-md: 0 0 10px var(--accent), 0 0 20px var(--accent);
+  --glow-lg: 0 0 20px var(--accent), 0 0 40px var(--accent);
+  
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  
+  /* Border radius - sharp corners for cyberpunk */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  
+  /* Typography */
+  --font-sans: 'Orbitron', 'Rajdhani', system-ui, sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+}
+
+/* CRT scanline effect */
+[data-theme="cyberpunk"]::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+  background-size: 100% 4px;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.3;
+}

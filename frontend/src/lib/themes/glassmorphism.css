@@ -1,0 +1,13 @@
+/* glassmorphism theme */
+:root {
+  --glass-bg: rgba(255,255,255,0.1);
+  --glass-border: rgba(255,255,255,0.2);
+  --glass-shadow: 0 8px 32px 0 rgba(0,0,0,0.3);
+}
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: var(--glass-shadow);
+}

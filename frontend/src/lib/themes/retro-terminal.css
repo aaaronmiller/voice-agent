@@ -1,0 +1,64 @@
+/* Retro Terminal Theme for Echo-Node */
+/* Green phosphor, vintage computer aesthetic */
+
+:root[data-theme="retro-terminal"] {
+  /* Colors - amber/green phosphor */
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --text-primary: #00ff41;
+  --text-secondary: #008f11;
+  --accent: #00ff41;
+  --accent-hover: #00cc33;
+  --border: #004400;
+  
+  /* State colors (green variants) */
+  --state-dormant: #004400;
+  --state-triggered: #00aa00;
+  --state-listening: #00ff41;
+  --state-processing: #00ff66;
+  --state-speaking: #00ff88;
+  
+  /* Glow effect */
+  --glow-text: 0 0 5px rgba(0, 255, 65, 0.5);
+  --glow-strong: 0 0 10px rgba(0, 255, 65, 0.8);
+  
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+  
+  /* Border radius - none for retro look */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  
+  /* Typography */
+  --font-sans: 'VT325', 'Press Start 2P', monospace;
+  --font-mono: 'VT325', 'Courier New', monospace;
+}
+
+/* Scanline animation */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+[data-theme="retro-terminal"]::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 10vh;
+  background: linear-gradient(to bottom, transparent, rgba(0, 255, 65, 0.1), transparent);
+  animation: scanline 3s linear infinite;
+  pointer-events: none;
+  z-index: 9998;
+}
+
+/* Text glow */
+[data-theme="retro-terminal"] {
+  text-shadow: var(--glow-text);
+}
