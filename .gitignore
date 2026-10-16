@@ -47,3 +47,7 @@ v2/lk_google/.env
 *.bak
 
 *.lemonslice
+
+# SvelteKit build output
+.svelte-kit/
+build/
