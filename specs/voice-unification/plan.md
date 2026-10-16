@@ -1,6 +1,6 @@
 ---
-date: 2026-10-15
-ver: 1.1.0
+date: 2026-10-16
+ver: 1.2.0
 author: system adjudicator
 tags: [strata, plan, voice-unification, system-derived, architecture]
 ---
@@ -157,3 +157,32 @@ evidence under declared conditions. Routing tests alone do not prove latency;
 speaker-output exclusion needs speaker tests. Report each target's results
 separately. Full completion requires all in-scope targets or an explicit scope
 revision; a desktop milestone cannot silently drop Android.
+
+## 8. Component registry + saved profiles + test matrix (added 2026-10-16)
+
+Registry (extends CTX-003; gateway/src/providers/registry.ts is the live
+prototype): every slot exposes capability descriptors (modality, streaming vs
+batch, latency class, license class, offline flag, hardware floor) and a
+conformance probe. Adding a component = registering descriptor + probe +
+profile entry; core paths never change (SPEC-012). Slot catalog lives in
+research-2026-10.md §§1–5; the registry records *which* candidates are wired,
+never a single mandated winner.
+
+Saved profiles (extends v2/profiles.yaml pattern): named full-stack
+combinations (STT+TTS+VAD+wake+dialogue+transport+avatar) stored as versioned
+documents, exportable/importable for transfer between machines. Profiles carry
+their hardware floor and expected SPEC coverage so a combination can be judged
+before running. Example profiles: offline-daily-driver, quality-clone-rig,
+hosted-latency-king, mac-satellite (Wyoming), budget-cascade.
+
+Test matrix (extends pipecat stt-benchmark + voicetest AgentGraph pattern):
+each profile runs the SPEC-001…012 acceptance surface plus slot-level probes
+(TTFS/semantic-WER for STT; TTFA/RTF for TTS; false-accept/reject for wake;
+AEC convergence; E2E SPEC-004 latency). Results attach to the profile as
+dated evidence; regressions fail the profile, not the registry. Matrix runs
+are configuration diffs, never code changes.
+
+Supersessions applied from research-2026-10.md §6 (old pin -> posture).
+Snowboy, production Edge-TTS, and Piper-as-quality-lead are removed from all
+paths. No model/library/version is pinned here; pins happen at build time
+with evidence recorded in preparation.json.
