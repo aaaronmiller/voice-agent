@@ -1,0 +1,15 @@
+# Layer allow-list — genuine user-facing names, not implementation choices.
+# Each entry is a case-insensitive token the validator must not treat as a
+# technology leak into intent.md / spec.md. One per line, `#` for comments.
+
+voiceink
+# VoiceInk: independent product/fork named as scope boundary (constitution P3,
+# intent §§3, 9). Identifies what is OUT of scope, never a prescribed stack.
+
+express
+# Ordinary English verb ("Platforms express scope"). Not the Node framework.
+# spec.md:11.
+
+intent.md
+# Provenance file reference ("derived from `intent.md`", spec.md:10).
+# Names the governing artifact, not a technology.

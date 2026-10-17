@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 1,
+  "kind": "strata-workbench",
+  "intake": "project-intake.json",
+  "mode": "auto",
+  "additionalFiles": "discover",
+  "integrations": {
+    "livingDocuments": {
+      "mode": "auto"
+    }
+  },
+  "buildRoot": "/home/cheta/code/buttplug/voice-agent",
+  "artifacts": [
+    {
+      "role": "constitution",
+      "scope": "intake",
+      "path": "constitution.md",
+      "use": "source"
+    },
+    {
+      "role": "intent",
+      "scope": "intake",
+      "path": "intent.md",
+      "use": "source"
+    },
+    {
+      "role": "plan",
+      "scope": "intake",
+      "path": "plan.md",
+      "use": "source"
+    },
+    {
+      "role": "preparation-receipt",
+      "scope": "intake",
+      "path": "preparation.json",
+      "use": "source"
+    },
+    {
+      "role": "reset-handoff",
+      "scope": "intake",
+      "path": "reset-handoff.md",
+      "use": "source"
+    },
+    {
+      "role": "spec",
+      "scope": "intake",
+      "path": "spec.md",
+      "use": "source"
+    },
+    {
+      "role": "substrate",
+      "scope": "intake",
+      "path": "substrate.md",
+      "use": "source"
+    },
+    {
+      "role": "tasks",
+      "scope": "intake",
+      "path": "tasks.md",
+      "use": "source"
+    },
+    {
+      "role": "continuity",
+      "scope": "intake",
+      "path": "ledger/ledger.md",
+      "use": "source"
+    },
+    {
+      "role": "continuity",
+      "scope": "intake",
+      "path": "ledger/standing.md",
+      "use": "source"
+    },
+    {
+      "role": "agent-instructions",
+      "scope": "build",
+      "path": "AGENTS.md",
+      "use": "operational"
+    },
+    {
+      "role": "tasks",
+      "scope": "build",
+      "path": "tasks.md",
+      "use": "operational"
+    },
+    {
+      "role": "agent-instructions",
+      "scope": "build",
+      "path": "archive/aaa-voice-assistant-work/AGENTS.md",
+      "use": "operational"
+    },
+    {
+      "role": "plan",
+      "scope": "build",
+      "path": "archive/aaa-voice-assistant-work/docs/design.md",
+      "use": "operational"
+    },
+    {
+      "role": "spec",
+      "scope": "build",
+      "path": "archive/aaa-voice-assistant-work/docs/requirements.md",
+      "use": "operational"
+    },
+    {
+      "role": "plan",
+      "scope": "build",
+      "path": "archive/realtime-voice-specs/design.md",
+      "use": "operational"
+    },
+    {
+      "role": "spec",
+      "scope": "build",
+      "path": "archive/realtime-voice-specs/requirements.md",
+      "use": "operational"
+    },
+    {
+      "role": "constitution",
+      "scope": "build",
+      "path": "echo-node.livingdoc/constitution.md",
+      "use": "operational"
+    },
+    {
+      "role": "data-model",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/data-model.md",
+      "use": "operational"
+    },
+    {
+      "role": "plan",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/plan.md",
+      "use": "operational"
+    },
+    {
+      "role": "quickstart",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/quickstart.md",
+      "use": "operational"
+    },
+    {
+      "role": "research",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/research.md",
+      "use": "operational"
+    },
+    {
+      "role": "spec",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/spec.md",
+      "use": "operational"
+    },
+    {
+      "role": "tasks",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/tasks.md",
+      "use": "operational"
+    },
+    {
+      "role": "quality-checklist",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/checklists/requirements.md",
+      "use": "operational"
+    },
+    {
+      "role": "contract",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/contracts/rest-api.md",
+      "use": "operational"
+    },
+    {
+      "role": "contract",
+      "scope": "build",
+      "path": "specs/001-echo-node-core/contracts/worker-protocol.md",
+      "use": "operational"
+    },
+    {
+      "role": "constitution",
+      "scope": "build",
+      "path": "specs/voice-unification/constitution.md",
+      "use": "operational"
+    },
+    {
+      "role": "intent",
+      "scope": "build",
+      "path": "specs/voice-unification/intent.md",
+      "use": "operational"
+    },
+    {
+      "role": "plan",
+      "scope": "build",
+      "path": "specs/voice-unification/plan.md",
+      "use": "operational"
+    },
+    {
+      "role": "preparation-receipt",
+      "scope": "build",
+      "path": "specs/voice-unification/preparation.json",
+      "use": "operational"
+    },
+    {
+      "role": "reset-handoff",
+      "scope": "build",
+      "path": "specs/voice-unification/reset-handoff.md",
+      "use": "operational"
+    },
+    {
+      "role": "spec",
+      "scope": "build",
+      "path": "specs/voice-unification/spec.md",
+      "use": "operational"
+    },
+    {
+      "role": "substrate",
+      "scope": "build",
+      "path": "specs/voice-unification/substrate.md",
+      "use": "operational"
+    },
+    {
+      "role": "tasks",
+      "scope": "build",
+      "path": "specs/voice-unification/tasks.md",
+      "use": "operational"
+    },
+    {
+      "role": "continuity",
+      "scope": "build",
+      "path": "specs/voice-unification/ledger/ledger.md",
+      "use": "operational"
+    },
+    {
+      "role": "continuity",
+      "scope": "build",
+      "path": "specs/voice-unification/ledger/standing.md",
+      "use": "operational"
+    },
+    {
+      "role": "tasks",
+      "scope": "build",
+      "path": "v2/TASKS.md",
+      "use": "operational"
+    },
+    {
+      "role": "research",
+      "scope": "build",
+      "path": "v2/docs/research.md",
+      "use": "operational"
+    },
+    {
+      "role": "constitution",
+      "scope": "build",
+      "path": ".specify/memory/constitution.md",
+      "use": "operational"
+    }
+  ]
+}

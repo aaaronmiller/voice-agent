@@ -1,0 +1,61 @@
+{
+  "artifacts": {
+    "constitution": "specs/voice-unification/constitution.md",
+    "evalManifest": "~/.strata/evals/voice-unification/evals.md (outside repository)",
+    "hashes": {
+      "specs/voice-unification/constitution.md": "0f91347cfb1c50dff59eea70cc89e367329f5952d44df150c638ef6c31c09f0f",
+      "specs/voice-unification/intent.md": "7c5ae7c81a0122395ebe22ddec81a3ff6e2f53efb7f8fe2e91ca26fee25ba5d7",
+      "specs/voice-unification/layer-allow.txt": "2cec6c152e77f04b9cac2116d681529ff2aaa0d7db5b0ef7908a21219528f206",
+      "specs/voice-unification/ledger/ledger.md": "4448ea127137d1eec91cb83b836ad7215a55779cf7a481a4b07e11e0ede25cca",
+      "specs/voice-unification/ledger/standing.md": "e20ead3884438fd3148726df6b143f00d7842a3221df4a1092f30d6ed1a0052d",
+      "specs/voice-unification/plan.md": "1b6fe978a0d30e8706f476814ce27e55acbe8a18361a86e8cf7d5c95fa07a4d7",
+      "specs/voice-unification/spec.md": "8df0b47a56a63ee2f6c9b90a80854d17b4c19b4b479b0c7c99f7dd3eadced7c1",
+      "specs/voice-unification/substrate.md": "233bef6e8662fe5d238ae7fb03bc5d297dc58d9e959c26b986b90752ce369857",
+      "specs/voice-unification/tasks.md": "a3951295997e19bb81cddd2e93d7cf9a064311b439c25c059b8eea627c472beb"
+    },
+    "intent": "specs/voice-unification/intent.md",
+    "ledger": "specs/voice-unification/ledger/ledger.md",
+    "organization": "specs/voice-unification/PART1-organization.md",
+    "plan": "specs/voice-unification/plan.md",
+    "research": "specs/voice-unification/research-2026-10.md",
+    "spec": "specs/voice-unification/spec.md",
+    "standing": "specs/voice-unification/ledger/standing.md",
+    "substrate": "specs/voice-unification/substrate.md",
+    "tasks": "specs/voice-unification/tasks.md"
+  },
+  "buildRoot": "/home/cheta/code/buttplug/voice-agent",
+  "gates": {
+    "analysis": {
+      "command": "python3 /home/cheta/code/custom-skills/strata/scripts/strata-validate.py specs/voice-unification (from build root)",
+      "evidence": "STRATA validation PASSED: layers separated, clauses evaluable and bound to external evals, spec in contact with context, continuity present, level declared. (57-token self-armed denylist after tasks.md joined the harvest set.)",
+      "observedAt": "2026-10-17T01:54Z",
+      "status": "passed"
+    },
+    "constitution": {
+      "command": "Read against specs/voice-unification/constitution.md G1-G5 (reviewer: preparation session, not the builder)",
+      "evidence": "G1 quarantine honored (research annex candidate-only; layer-allow.txt justifies 3 names). G2 platform honesty intact (per-target evidence required; Sec 3 of spec). G3 eval separation holds (12 blind cases at ~/.strata/evals/voice-unification/evals.md; evaluator-context isolation NOT established, disclosed). G4 MIT root verified (LICENSE, live lineage). G5 this receipt is the evidence record; tasks.md unchecked pending implementation.",
+      "observedAt": "2026-10-17T01:54Z",
+      "status": "passed"
+    },
+    "prerequisites": {
+      "command": "which specify; specify --help | head; ls gateway/src/providers/registry.ts v2/echo_node/slots/registry.py v2/profiles.yaml",
+      "evidence": "Spec Kit CLI present (/home/cheta/.local/bin/specify). Live prototypes confirmed: gateway registry (gemini-live, openai-realtime, hermes, pi-agent, stub), v2 slot ABCs + registry + validation, v2/profiles.yaml (3 named profiles). No runtime acceptance proven (G2 open).",
+      "observedAt": "2026-10-17T01:54Z",
+      "status": "passed"
+    },
+    "traceability": {
+      "command": "python3 /home/cheta/code/custom-skills/strata/scripts/strata-validate.py specs/voice-unification --trace",
+      "evidence": "All 12 clauses carry EVAL tags resolving to the external manifest; every clause cited by plan decisions (SPEC-002/003/005/009/011 citations completed in plan v1.2.1); every clause traces to intent sections. Standing Not-yet-decided items point at T001-T004.",
+      "observedAt": "2026-10-17T01:54Z",
+      "status": "passed"
+    }
+  },
+  "lifecycle": "specification-prepared",
+  "schemaVersion": 1,
+  "source": {
+    "mode": "existing-specs (human-authored pack, pre-ratified)",
+    "provisionalStaleCopy": "/home/cheta/code/voice-agent/specs/voice-unification (superseded working copy, NOT edited except by prior session; do not build from it)",
+    "repo": "git@github.com:aaaronmiller/voice-agent.git",
+    "revision": "d81069e"
+  }
+}

@@ -1,6 +1,6 @@
 ---
-date: 2026-10-16
-ver: 1.2.0
+date: 2026-10-17
+ver: 1.2.1
 author: system adjudicator
 tags: [strata, plan, voice-unification, system-derived, architecture]
 ---
@@ -58,7 +58,7 @@ later within the same product scope. No cockpit shell is required by the intent.
 
 **CTX-003: Configuration-driven compatible providers.**
 
-- Derivation: intent §§4–5, §7; SPEC-008/009/012.
+- Derivation: intent §§4–5, §7; SPEC-008, SPEC-009, SPEC-012.
 - Define supported speech, session, cancellation, and credential capabilities.
   Keep integrations behind that boundary; configuration selects conforming
   endpoints/models without executable registration or changes to core paths.
@@ -69,7 +69,7 @@ later within the same product scope. No cockpit shell is required by the intent.
 
 **CTX-004: Re-derive turn-taking; coordinate dictation.**
 
-- Derivation: intent §§3–4, §6; SPEC-001/002/003/005/007/011.
+- Derivation: intent §§3–4, §6; SPEC-001, SPEC-002, SPEC-003, SPEC-005, SPEC-007, SPEC-011.
 - Detect genuine user speech during playback while excluding machine output.
   Stop obsolete playback and retain leading user speech. Import neither the old
   implementation nor its fixed state count.
@@ -81,7 +81,7 @@ later within the same product scope. No cockpit shell is required by the intent.
 
 **CTX-005: Dictation first; retain all target coverage.**
 
-- Derivation: intent §§1, 3, 5; SPEC-006/007/009/011.
+- Derivation: intent §§1, 3, 5; SPEC-006, SPEC-007, SPEC-009, SPEC-011.
 - Start with Windows dictation, the smallest acceptance surface, then dialogue,
   Linux, coexistence, and WSL. Android follows as a required later phase.
 - Investigate target restrictions before promising delivery, especially background
@@ -152,11 +152,9 @@ Part 1 disposition actions.
 | A4 | WSL forwarding and host-failure reporting | SPEC-010 using the proven Windows paths |
 | B | Android delivery of the same consumer outcomes | SPEC-001–009/011/012 on Android |
 
-Measure the response target with actual hosted-service and physical audio
-evidence under declared conditions. Routing tests alone do not prove latency;
+Measure the response target (SPEC-004) with actual hosted-service and physical audio evidence under declared conditions. Routing tests alone do not prove latency;
 speaker-output exclusion needs speaker tests. Report each target's results
-separately. Full completion requires all in-scope targets or an explicit scope
-revision; a desktop milestone cannot silently drop Android.
+separately. Full completion requires all in-scope targets or an explicit scope revision; a desktop milestone cannot silently drop Android.
 
 ## 8. Component registry + saved profiles + test matrix (added 2026-10-16)
 
