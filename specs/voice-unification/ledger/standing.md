@@ -19,8 +19,9 @@ green. No implementation has started under this preparation.
 ## Last decisions that matter
 
 - SEQ 1: human-authored pack consumed as pre-ratified Existing-specs intake;
-  stale `/home/cheta/code/voice-agent` copy superseded, live
-  `buttplug/voice-agent` copy authoritative.
+  stale `/home/cheta/code/voice-agent` copy (removed 2026-10-17, checkpointed
+  to `~/agent_trash/voice-agent-stale-2026-10-17/`) superseded; live repo moved
+  from `code/buttplug/voice-agent` to `code/voice-agent`, authoritative here.
 - SEQ 2–3: drift citations completed in plan v1.2.1; `layer-allow.txt`
   justifies voiceink / express / intent.md as user-facing names.
 - SEQ 4–5: substrate S3 declared; twelve blind evals held outside the repo at

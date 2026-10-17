@@ -9,7 +9,7 @@
       "mode": "auto"
     }
   },
-  "buildRoot": "/home/cheta/code/buttplug/voice-agent",
+  "buildRoot": "/home/cheta/code/voice-agent",
   "artifacts": [
     {
       "role": "constitution",

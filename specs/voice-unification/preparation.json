@@ -6,8 +6,8 @@
       "specs/voice-unification/constitution.md": "0f91347cfb1c50dff59eea70cc89e367329f5952d44df150c638ef6c31c09f0f",
       "specs/voice-unification/intent.md": "7c5ae7c81a0122395ebe22ddec81a3ff6e2f53efb7f8fe2e91ca26fee25ba5d7",
       "specs/voice-unification/layer-allow.txt": "2cec6c152e77f04b9cac2116d681529ff2aaa0d7db5b0ef7908a21219528f206",
-      "specs/voice-unification/ledger/ledger.md": "4448ea127137d1eec91cb83b836ad7215a55779cf7a481a4b07e11e0ede25cca",
-      "specs/voice-unification/ledger/standing.md": "e20ead3884438fd3148726df6b143f00d7842a3221df4a1092f30d6ed1a0052d",
+      "specs/voice-unification/ledger/ledger.md": "4d152b199e65a4492b3cd45bde3a6f8a2da9cf189e8edfae967169fa7251efa1",
+      "specs/voice-unification/ledger/standing.md": "f244d061d775729e4b5e829d3bbebed4348cb0f4dcfbf8d5b9e5b7c4e29275a9",
       "specs/voice-unification/plan.md": "1b6fe978a0d30e8706f476814ce27e55acbe8a18361a86e8cf7d5c95fa07a4d7",
       "specs/voice-unification/spec.md": "8df0b47a56a63ee2f6c9b90a80854d17b4c19b4b479b0c7c99f7dd3eadced7c1",
       "specs/voice-unification/substrate.md": "233bef6e8662fe5d238ae7fb03bc5d297dc58d9e959c26b986b90752ce369857",
@@ -23,7 +23,7 @@
     "substrate": "specs/voice-unification/substrate.md",
     "tasks": "specs/voice-unification/tasks.md"
   },
-  "buildRoot": "/home/cheta/code/buttplug/voice-agent",
+  "buildRoot": "/home/cheta/code/voice-agent",
   "gates": {
     "analysis": {
       "command": "python3 /home/cheta/code/custom-skills/strata/scripts/strata-validate.py specs/voice-unification (from build root)",

@@ -9,10 +9,11 @@ tags: [strata, handoff, voice-unification, reset]
 
 ## Build root (only authority)
 
-`/home/cheta/code/buttplug/voice-agent` — repo
-`git@github.com:aaaronmiller/voice-agent.git`, revision `d81069e` at
-preparation time. The stale copy at `/home/cheta/code/voice-agent` is
-superseded; never build from it.
+`/home/cheta/code/voice-agent` — repo
+`git@github.com:aaaronmiller/voice-agent.git`, revision `eb56e43` at
+preparation time (moved from `code/buttplug/voice-agent` 2026-10-17; stale
+`/home/cheta/code/voice-agent` copy removed, checkpointed to
+`~/agent_trash/voice-agent-stale-2026-10-17/`).
 
 ## Canonical paths (all relative to build root)
 

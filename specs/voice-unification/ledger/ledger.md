@@ -89,3 +89,17 @@ monotonic and never reused. Phase.step uses STRATA phase notation.
 - Why: Strata Phase 5a lens 3; agents build now against the repo that ships.
 - Effect: Recorded here and in standing.md; tasks.md next.
 - Outcome: complete
+
+## 9 [7.relocate] decision
+- What: Removed the stale `/home/cheta/code/voice-agent` copy (checkpointed
+  to `~/agent_trash/voice-agent-stale-2026-10-17/` with MANIFEST + restore
+  line) and moved the authoritative repo from `code/buttplug/voice-agent` to
+  `code/voice-agent`; updated preparation.json buildRoot, standing, and
+  reset-handoff to the new root.
+- Why: User-authorized removal of the conflicting pack copy; single
+  authoritative checkout at the top-level path AGENTS.md already names.
+- Effect: `specs/voice-unification/{preparation.json,reset-handoff.md,
+  ledger/standing.md,workbench.json}` point at `/home/cheta/code/voice-agent`;
+  historical `buttplug/voice-agent` strings remain only in PART1 inventory
+  (provenance) and archive notes.
+- Outcome: pending validator + workbench re-check

@@ -1,1 +1,126 @@
-{"assignment":"assigned","externalResources":[{"handling":"evaluator-private; builder MUST NOT read","path":"~/.strata/evals/voice-unification/evals.md","role":"held-out-eval-manifest"}],"issues":[{"detail":"Evaluator-context isolation beyond path separation not established; disclosed in substrate.md and reset-handoff.md.","severity":"info"},{"detail":"Windows capability findings (background listening, insertion/clipboard, permission APIs) deferred to T003 with explicit-gap rule.","severity":"missing-input"},{"detail":"Android delivery shape deferred to Phase B with capability checks first (plan CTX-005).","severity":"missing-input"}],"lifecycle":"specification-prepared","nextOperation":"specification preparation complete (validator green); fresh-harness initiation requires explicit launch authority","projectId":"voice-unification","readOrder":["intent.md","spec.md","plan.md","constitution.md","research-2026-10.md","PART1-organization.md","substrate.md","tasks.md","ledger/standing.md","reset-handoff.md"],"relatedProjects":[{"note":"Independent macOS fork; stays separate per constitution P3.","path":"Beingpax/VoiceInk fork + local mods"},{"note":"Superseded stale working copy; do not build from it.","path":"/home/cheta/code/voice-agent"}],"schemaVersion":1,"sources":[{"format":"markdown","path":"intent.md","role":"human-intent","sha256":"7c5ae7c81a0122395ebe22ddec81a3ff6e2f53efb7f8fe2e91ca26fee25ba5d7"},{"format":"markdown","path":"spec.md","role":"behavioral-contract","sha256":"8df0b47a56a63ee2f6c9b90a80854d17b4c19b4b479b0c7c99f7dd3eadced7c1"},{"format":"markdown","path":"plan.md","role":"derived-architecture","sha256":"1b6fe978a0d30e8706f476814ce27e55acbe8a18361a86e8cf7d5c95fa07a4d7"},{"format":"markdown","path":"constitution.md","role":"governance","sha256":"0f91347cfb1c50dff59eea70cc89e367329f5952d44df150c638ef6c31c09f0f"},{"format":"markdown","path":"research-2026-10.md","role":"candidate-survey","sha256":"73a715a83975f85261f895fe1dd2c9dd3036648535a0d4b63a68eb4cce95edee"},{"format":"markdown","path":"PART1-organization.md","role":"existing-state-disposition","sha256":"367e4d96aba5b33e47444908e884a8030b751b7346faa305f4e411531b75ec9c"},{"format":"markdown","path":"substrate.md","role":"substrate-declaration","sha256":"233bef6e8662fe5d238ae7fb03bc5d497dc58d9e959c26b986b90752ce369857"},{"format":"markdown","path":"tasks.md","role":"gated-tasks","sha256":"a3951295997e19bb81cddd2e93d7cf9a064311b439c25c059b8eea627c472beb"},{"format":"markdown","path":"ledger/ledger.md","role":"continuity","sha256":"4448ea127137d1eec91cb83b836ad7215a55779cf7a481a4b07e11e0ede25cca"},{"format":"markdown","path":"ledger/standing.md","role":"continuity","sha256":"e20ead3884438fd3148726df6b143f00d7842a3221df4a1092f30d6ed1a0052d"},{"format":"markdown","path":"preparation.json","role":"preparation-receipt","sha256":"058e22db9cc7231a85dca7ef0c96fd3780905002bb361229f54ad1f611ed37f2"},{"format":"markdown","path":"reset-handoff.md","role":"fresh-session-handoff","sha256":"36bd726398248981efe8bf8e1399bee438e1e06c938bbdbb481c8734f1ed13f8"}],"summary":"Single-maintainer hands-free spoken dialogue + separate hotkey dictation on Windows/Linux/Android; configuration-driven providers via registry + saved profiles + test matrix. Live lineage aaaronmiller/voice-agent at d81069e.","title":"Voice unification"}
+{
+  "assignment": "assigned",
+  "externalResources": [
+    {
+      "handling": "evaluator-private; builder MUST NOT read",
+      "path": "~/.strata/evals/voice-unification/evals.md",
+      "role": "held-out-eval-manifest"
+    }
+  ],
+  "issues": [
+    {
+      "detail": "Evaluator-context isolation beyond path separation not established; disclosed in substrate.md and reset-handoff.md.",
+      "severity": "info"
+    },
+    {
+      "detail": "Windows capability findings (background listening, insertion/clipboard, permission APIs) deferred to T003 with explicit-gap rule.",
+      "severity": "missing-input"
+    },
+    {
+      "detail": "Android delivery shape deferred to Phase B with capability checks first (plan CTX-005).",
+      "severity": "missing-input"
+    }
+  ],
+  "lifecycle": "specification-prepared",
+  "nextOperation": "specification preparation complete (validator green); fresh-harness initiation requires explicit launch authority",
+  "projectId": "voice-unification",
+  "readOrder": [
+    "intent.md",
+    "spec.md",
+    "plan.md",
+    "constitution.md",
+    "research-2026-10.md",
+    "PART1-organization.md",
+    "substrate.md",
+    "tasks.md",
+    "ledger/standing.md",
+    "reset-handoff.md"
+  ],
+  "relatedProjects": [
+    {
+      "note": "Independent macOS fork; stays separate per constitution P3.",
+      "path": "Beingpax/VoiceInk fork + local mods"
+    },
+    {
+      "note": "Superseded stale working copy; do not build from it.",
+      "path": "/home/cheta/code/voice-agent"
+    }
+  ],
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "format": "markdown",
+      "path": "intent.md",
+      "role": "human-intent",
+      "sha256": "7c5ae7c81a0122395ebe22ddec81a3ff6e2f53efb7f8fe2e91ca26fee25ba5d7"
+    },
+    {
+      "format": "markdown",
+      "path": "spec.md",
+      "role": "behavioral-contract",
+      "sha256": "8df0b47a56a63ee2f6c9b90a80854d17b4c19b4b479b0c7c99f7dd3eadced7c1"
+    },
+    {
+      "format": "markdown",
+      "path": "plan.md",
+      "role": "derived-architecture",
+      "sha256": "1b6fe978a0d30e8706f476814ce27e55acbe8a18361a86e8cf7d5c95fa07a4d7"
+    },
+    {
+      "format": "markdown",
+      "path": "constitution.md",
+      "role": "governance",
+      "sha256": "0f91347cfb1c50dff59eea70cc89e367329f5952d44df150c638ef6c31c09f0f"
+    },
+    {
+      "format": "markdown",
+      "path": "research-2026-10.md",
+      "role": "candidate-survey",
+      "sha256": "73a715a83975f85261f895fe1dd2c9dd3036648535a0d4b63a68eb4cce95edee"
+    },
+    {
+      "format": "markdown",
+      "path": "PART1-organization.md",
+      "role": "existing-state-disposition",
+      "sha256": "367e4d96aba5b33e47444908e884a8030b751b7346faa305f4e411531b75ec9c"
+    },
+    {
+      "format": "markdown",
+      "path": "substrate.md",
+      "role": "substrate-declaration",
+      "sha256": "233bef6e8662fe5d238ae7fb03bc5d497dc58d9e959c26b986b90752ce369857"
+    },
+    {
+      "format": "markdown",
+      "path": "tasks.md",
+      "role": "gated-tasks",
+      "sha256": "a3951295997e19bb81cddd2e93d7cf9a064311b439c25c059b8eea627c472beb"
+    },
+    {
+      "format": "markdown",
+      "path": "ledger/ledger.md",
+      "role": "continuity",
+      "sha256": "4d152b199e65a4492b3cd45bde3a6f8a2da9cf189e8edfae967169fa7251efa1"
+    },
+    {
+      "format": "markdown",
+      "path": "ledger/standing.md",
+      "role": "continuity",
+      "sha256": "f244d061d775729e4b5e829d3bbebed4348cb0f4dcfbf8d5b9e5b7c4e29275a9"
+    },
+    {
+      "format": "markdown",
+      "path": "preparation.json",
+      "role": "preparation-receipt",
+      "sha256": "db8f93fbfcadc2269f43e9ce423e0ef9f8ba5e6fa31ec77c2e23356726163de3"
+    },
+    {
+      "format": "markdown",
+      "path": "reset-handoff.md",
+      "role": "fresh-session-handoff",
+      "sha256": "b9b7d16e54d476ea6a090b9e618970ee3ca31493183e7ff2dcb2fa2f385c7e87"
+    }
+  ],
+  "summary": "Single-maintainer hands-free spoken dialogue + separate hotkey dictation on Windows/Linux/Android; configuration-driven providers via registry + saved profiles + test matrix. Live lineage aaaronmiller/voice-agent at d81069e.",
+  "title": "Voice unification"
+}
