@@ -1,7 +1,7 @@
 ---
 title: Voice unification constitution
 version: "1.1.0"
-tags: [strata, constitution, voice-unification, gates]
+tags: [spec-prep, constitution, voice-unification, gates]
 ---
 
 # Voice unification constitution

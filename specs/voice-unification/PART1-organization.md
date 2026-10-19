@@ -1,6 +1,6 @@
 # Part 1: organization of existing voice projects
 
-Existing-state disposition plan, outside Strata product requirements. VoiceInk
+Existing-state disposition plan, outside spec-prep product requirements. VoiceInk
 stays independent; macOS behavior is never judged by Windows/Linux criteria or
 used to certify them. This document merge executes no disposition actions.
 

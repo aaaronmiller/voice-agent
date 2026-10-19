@@ -10,6 +10,7 @@ Available backends:
   codex       → Codex CLI (codex "...")
   openai      → OpenAI API (direct)
   openrouter  → OpenRouter API (direct)
+  ollama      → local Ollama server, OpenAI-compat, no key (default localhost:11434)
 
 Experimental (voice-native, standalone CLI only — not text chat backends):
   gemini_live     → Gemini Multimodal Live API
@@ -677,6 +678,129 @@ class OpenRouterBackend(AgentBackend):
                 self._history = self._history[-(self.max_history * 2):]
 
 
+class OllamaBackend(AgentBackend):
+    """Local Ollama server (OpenAI-compat `/v1/chat/completions`, no key).
+
+    Proven 2026-10-17: qwen2.5:0.5b warm first-token ~0.2s on CPU;
+    reachable from Windows via WSL localhost forwarding at the same
+    default URL. `keep_alive` pins the model warm (cold load ~25s).
+    Config (under ``backend`` section):
+      model: "qwen2.5:0.5b"
+      base_url: "http://127.0.0.1:11434/v1"   (default)
+      keep_alive: -1                          (default: pinned warm)
+      timeout_seconds: 30
+      max_history_turns: 0
+    """
+
+    name: str = "Ollama (local)"
+    config_key: str = "ollama"
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__(config=config)
+        self.model = str(config.get("model", "qwen2.5:0.5b"))
+        self.base_url = str(config.get("base_url", "http://127.0.0.1:11434/v1")).rstrip("/")
+        self.keep_alive = config.get("keep_alive", -1)
+        self.timeout = float(config.get("timeout_seconds", 30))
+        self.max_history = int(config.get("max_history_turns", 0))
+        self._history: list[dict[str, str]] = []
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="ollama",
+            languages=["en"],
+            streaming=True,  # chat_stream() implements SSE streaming
+            gpu_required=False,  # server-side concern, not the client's
+            license="unknown",
+            network=False,  # localhost / LAN server
+            notes="local Ollama server (default http://127.0.0.1:11434)",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        cfg = config or {}
+        base = str(cfg.get("base_url", "http://127.0.0.1:11434/v1")).rstrip("/")
+        host = base.removesuffix("/v1")
+        ok, info = check_http(host + "/api/tags", timeout=1.5)
+        if ok:
+            return ok_result(f"Ollama server reachable ({info})", {"base_url": base})
+        return ValidationResult(False, f"Ollama server not reachable: {info}",
+                                {"base_url": base})
+
+    def is_available(self) -> bool:
+        ok, _ = check_http(self._tags_url(), timeout=1.5)
+        return ok
+
+    def _tags_url(self) -> str:
+        base = self.base_url
+        host = base.removesuffix("/v1")
+        return host.rstrip("/") + "/api/tags"
+
+    def _messages(self, text: str, system: str) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        if self.max_history > 0 and self._history:
+            messages.extend(self._history)
+        messages.append({"role": "user", "content": text})
+        return messages
+
+    def _remember(self, text: str, reply: str) -> None:
+        if self.max_history > 0 and reply:
+            self._history.append({"role": "user", "content": text})
+            self._history.append({"role": "assistant", "content": reply})
+            if len(self._history) > self.max_history * 2:
+                self._history = self._history[-(self.max_history * 2):]
+
+    def chat(self, text: str, system: str = "") -> str:
+        try:
+            r = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json={"model": self.model, "messages": self._messages(text, system),
+                      "stream": False, "keep_alive": self.keep_alive},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            reply = str(r.json()["choices"][0]["message"]["content"]).strip()
+            self._remember(text, reply)
+            return reply
+        except Exception as exc:  # noqa: BLE001 — backend errors become speakable sentences, never tracebacks
+            return _spoken_error("Ollama", exc)
+
+    def chat_stream(self, text: str, system: str = "") -> Iterable[tuple[str, bool]]:
+        full_reply: list[str] = []
+        try:
+            with requests.post(
+                f"{self.base_url}/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json={"model": self.model, "messages": self._messages(text, system),
+                      "stream": True, "keep_alive": self.keep_alive},
+                timeout=self.timeout,
+                stream=True,
+            ) as r:
+                r.raise_for_status()
+                first = True
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8")
+                    if not decoded.startswith("data: "):
+                        continue
+                    payload = decoded[6:].strip()
+                    if payload == "[DONE]":
+                        break
+                    data = json.loads(payload)
+                    piece = str(data.get("choices", [{}])[0].get("delta", {}).get("content", "") or "")
+                    if piece:
+                        full_reply.append(piece)
+                        yield piece, first
+                        first = False
+        except Exception as exc:  # noqa: BLE001 — backend errors become speakable sentences, never tracebacks
+            yield _spoken_error("Ollama", exc), True
+        self._remember(text, "".join(full_reply).strip())
+
+
 # ── Experimental: live-voice providers ────────────────────────────
 #
 # NOTE: Gemini Live and OpenAI Realtime are voice-native WebSocket
@@ -768,6 +892,7 @@ class OpenAIRealtimeBackend(AgentBackend):
             notes=("experimental: voice-native provider, NOT a text backend; "
                    "standalone CLI at v2/providers/openai_realtime.py"),
         )
+
 
     @classmethod
     def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
@@ -901,6 +1026,7 @@ REGISTRY: dict[str, type[AgentBackend]] = {
     "codex": CodexBackend,
     "openai": OpenAIBackend,
     "openrouter": OpenRouterBackend,
+    "ollama": OllamaBackend,
     # Experimental voice-native providers (standalone CLI; chat() unsupported)
     "gemini_live": GeminiLiveBackend,
     "openai_realtime": OpenAIRealtimeBackend,

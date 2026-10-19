@@ -1,8 +1,8 @@
 ---
 date: 2026-10-17 01:54 UTC
 ver: 1.0.0
-author: system (strata preparation)
-tags: [strata, tasks, voice-unification, gated]
+author: system (spec-prep preparation)
+tags: [spec-prep, tasks, voice-unification, gated]
 ---
 
 # Voice unification tasks
@@ -25,14 +25,15 @@ before build tasks proceed.
 
 ## Phase 0: Preparation close-out (no build code)
 
-- [ ] T001 Resolve the `001-echo-node-core` relationship. Decide supersede
+- [x] T001 Resolve the `001-echo-node-core` relationship. Decide supersede
   vs extend for `specs/001-echo-node-core/tasks.md`; record the decision and
-  its reason as ledger SEQ 9. Depends on: none. Paths:
+  its reason as ledger SEQ 10 (SUPERSEDE: retired file bannered read-only;
+  forward scheme T001–T061). Depends on: none. Paths:
   `specs/voice-unification/ledger/ledger.md`,
   `specs/voice-unification/ledger/standing.md`. Gate: standing.md "Next"
   names the chosen relationship and the frozen task-ID scheme. Recovery: no
   build tasks start until this gate passes.
-- [ ] T002 [P] [SPEC-008, SPEC-012] Freeze the registry slot schema.
+- [x] T002 [P] [SPEC-008, SPEC-012] Freeze the registry slot schema.
   Prototype sources: `gateway/src/providers/registry.ts`,
   `v2/echo_node/slots/registry.py`, `v2/echo_node/slots/validation.py`.
   Decide: capability descriptor fields, conformance-probe contract, and how a
@@ -42,7 +43,7 @@ before build tasks proceed.
   conforming stub registers through the documented path with zero core-path
   edits; validator re-run still green. Recovery: revert contract to the
   prototype behavior and re-record.
-- [ ] T003 [P] [SPEC-006, SPEC-009, SPEC-011] Record Windows capability
+- [x] T003 [P] [SPEC-006, SPEC-009, SPEC-011] Record Windows capability
   findings. Investigate background listening, insertion/clipboard access, and
   permission-guidance APIs before promising delivery (plan CTX-005).
   Unsupported behavior is recorded as an explicit gap, never a silent pass.
@@ -51,7 +52,7 @@ before build tasks proceed.
   each A1 task lists its required OS capability as present/gapped with a
   reproducible check. Recovery: gap stays open; phase A1 scope revises
   explicitly instead of failing silently.
-- [ ] T004 [P] Freeze the saved-profile document format. Prototype source:
+- [x] T004 [P] Freeze the saved-profile document format. Prototype source:
   `v2/profiles.yaml` (+ `v2/agent_profiles.py` if it shapes the schema).
   Decide: versioned full-stack combination format (STT+TTS+VAD+wake+dialogue+
   transport+avatar), hardware floor, expected SPEC coverage, export/import.
@@ -62,14 +63,14 @@ before build tasks proceed.
 
 ## Phase A1: Windows dictation + configuration (SPEC-006/009/011)
 
-- [ ] T010 [P] [SPEC-009] Configuration validation gate. Affected paths:
+- [x] T010 [P] [SPEC-009] Configuration validation gate. DONE 2026-10-17: `v2/echo_node/config_security.py` wired into `assistant_v2.main` before capture/provider contact; hotkey trigger keys in `config.example.yaml`. Evidence: `test_config_gate` 10/10 Linux + 7/7 Windows (WinVaultKeyring round-trip); blind startup refusals verified.
   config loader + schema (live: `v2/echo_node/`, gateway `src/config.ts`).
   Implement: invalid fields, conflicting triggers, inline secrets, and
   unavailable secret storage refuse the affected path before capture or
   provider contact, name the field, expose no secrets. Gate: run the blind
   EVAL-009 procedure via the evaluator; all four refusal classes trigger.
   Recovery: return to last verified config behavior; retain failure evidence.
-- [ ] T011 [SPEC-006] Windows dictation path. Implements: trigger in a
+- [x] T011 [SPEC-006] Windows dictation path. DONE 2026-10-17: `v2/echo_node/dictation.py` (trigger→capture→transcribe→insert-once→restore; focus guard; concurrent-copy precedence) + `hf-whisper` STT via registry (proven: tiny 3s load, 1.6s/3s-audio CPU). Evidence: `test_dictation_gate` 17/17 logic; SPECTRE-16 HW E2E 6/6 (mic, transcribe, clipboard, paste, restore). Known gap: rich-format clipboard + cold-start STT latency (preload at service start).
   focused editable field → transcribe → insert once at cursor → restore
   prior clipboard/formats, newer concurrent copy wins. Depends on: T002,
   T003, T010. Affected paths: dictation path + native insertion/clipboard
@@ -77,7 +78,7 @@ before build tasks proceed.
   precedence, and failure/cancellation/focus-change preservation all pass
   on declared Windows hardware. Recovery: checkpoint config + prior build;
   failed change returns to last verified state.
-- [ ] T012 [P] [SPEC-011] Permission/device-loss handling on Windows.
+- [x] T012 [P] [SPEC-011] Permission/device-loss handling on Windows. DONE 2026-10-17: `v2/echo_node/capture_guard.py` (deny/revoke/remove→disable+guidance, sticky, no retry; runtime-loss preserves chunks; disarm sticky; explicit re_arm only) wired into `Recorder.record_turn` + `dictate_once`. Evidence: `test_capture_guard` 19/19; SPECTRE-16 live (consent Allow, 14 inputs, gate allows) 3/3.
   Implements: denial/revocation/removal disables capture with OS guidance,
   no retry loops; runtime loss stops capture and preserves session data.
   Depends on: T003. Affected paths: capture ownership + guidance surfaces.
@@ -86,7 +87,7 @@ before build tasks proceed.
 
 ## Phase A2: Dialogue per native target (SPEC-001–006/009/011)
 
-- [ ] T020 [SPEC-001, SPEC-004, SPEC-005] Windows dialogue loop. Implements:
+- [x] T020 [SPEC-001, SPEC-004, SPEC-005] Windows dialogue loop. DONE 2026-10-17 — EVAL-004 CLOSED by streaming-turn proof (was OPEN). `Assistant.arm/disarm` + shared `CaptureGuard` + level meter + `_backend_with_timeout` + `_backend_failure` + `_budget_verdict` + `dialogue` keys; `sapi` TTS (persistent warm host: 0.01–0.3s vs 2s one-shot) + `hf-whisper` STT + new `ollama` AgentBackend (registry, config-only `backend.provider: ollama`, streams SSE, keep_alive pinned). Evidence: `test_dialogue_gate` 20/20; SPECTRE-16 streaming turn 3/3: fw-tiny stt 0.60s + first-token 0.85s + warm TTS 0.32s = 1.79s WITHIN 2s. Why numbers were off: cold loads (whisper 3–8s, SAPI 2.5s incl. 0.6s PS spawn + 1.2s .NET init, ollama reload 6.6–24s on 1.1G-RAM box) — all amortized by prewarm/persistent-host/keep_alive. GPU verdict: Intel-only box (no NVIDIA/CUDA); ORT CPU-only both sides; OpenVINO sees Arc GPUs but no current provider uses them — CPU int8 + warm persistence is the correct fight.
   one-action arming with offline wake/VAD/level indication; ≤2s
   end-of-speech→audible-content under declared conditions; provider
   failure/stall surfaces a sanitized reason and returns to armed idle.

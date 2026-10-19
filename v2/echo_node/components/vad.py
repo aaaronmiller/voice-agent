@@ -196,7 +196,14 @@ class Recorder:
         self.min_record_seconds = float(config.get("min_record_seconds", 0.45))
         self.wake_speech_timeout_seconds = float(config.get("wake_speech_timeout_seconds", 6))
 
-    def record_turn(self) -> Path | None:
+    def record_turn(self, guard: Any = None) -> Path | None:
+        # T012: permission/device gate BEFORE capture. Denial stays
+        # disabled with guidance — no retry loops; explicit re-arm only.
+        if guard is not None:
+            status = guard.check_capture()
+            if not status.allowed:
+                print(f"[capture] disabled ({status.reason}): {status.guidance}", flush=True)
+                return None
         started = time.monotonic()
         speech_started_at: float | None = None
         silence_started_at: float | None = None

@@ -2,7 +2,7 @@
 date: 2026-08-29
 ver: 1.0.0
 author: OpenAI GPT-5.6 Sol
-tags: [strata, design, realtime-voice, tauri, svelte, rust, android, audio, providers]
+tags: [spec-prep, design, realtime-voice, tauri, svelte, rust, android, audio, providers]
 status: derived-design-baseline
 project: realtime-voice-cockpit
 derives_from: requirements.md

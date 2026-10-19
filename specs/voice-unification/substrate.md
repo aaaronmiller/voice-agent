@@ -1,8 +1,8 @@
 ---
 date: 2026-10-17 01:54 UTC
 ver: 1.0.0
-author: system (strata preparation)
-tags: [strata, substrate, voice-unification, honesty]
+author: system (spec-prep preparation)
+tags: [spec-prep, substrate, voice-unification, honesty]
 ---
 
 # Substrate Self-Location
@@ -27,7 +27,7 @@ spec alone, which this project does not claim.
 - MIT root license and no-AGPL rule (constitution G4, plan CTX-006).
 - VoiceInk independence and macOS-evidence quarantine (constitution P3).
 - Eval separation: private cases live at
-  `~/.strata/evals/voice-unification/evals.md` and are unseen by the builder.
+  `~/.spec-prep/evals/voice-unification/evals.md` and are unseen by the builder.
 
 ## Live-resolved decisions
 
@@ -45,7 +45,7 @@ spec alone, which this project does not claim.
 Partial. This preparation creates the first ledger
 (`ledger/ledger.md`, SEQ 1–8) from inspected live-tree evidence
 (registry.ts provider set, v2/profiles.yaml, slots/ ABCs, d81069e research
-annex). No prior STRATA ledger existed in this workspace, so context
+annex). No prior spec-prep ledger existed in this workspace, so context
 derivation before this point was intuition- and survey-based; that limit is
 stated in plan §1 and is not revised away here.
 

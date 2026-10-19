@@ -1,0 +1,41 @@
+format: voice-profile/v1
+name: hosted-latency-king
+version: 1
+description: 'Lowest-latency hosted voice path: live voice provider, local wake/VAD
+  controls.'
+stack:
+  wake_word: openwakeword
+  vad: openwakeword
+  stt: faster-whisper
+  tts: kokoro
+  agent_backend: gemini-live
+  avatar: none
+  audio_io: sounddevice
+  barge_in: vad_gated
+dialogue:
+  provider: gemini-live
+  transport: websocket
+params:
+  tts.speed: '1.0'
+  barge_in.enabled: 'true'
+secrets:
+  gemini.api_key: env:GEMINI_API_KEY
+hardware_floor:
+  os:
+  - linux
+  - windows
+  ram_gb: 4
+  gpu: none-required
+  audio: mic + speakers, 16kHz capture
+  network: stable broadband for hosted dialogue
+covers:
+- SPEC-001
+- SPEC-002
+- SPEC-003
+- SPEC-004
+- SPEC-005
+- SPEC-008
+- SPEC-009
+- SPEC-011
+- SPEC-012
+evidence: []

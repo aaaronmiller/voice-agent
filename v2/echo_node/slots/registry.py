@@ -184,16 +184,18 @@ def register_builtin(reg: ProviderRegistry | None = None) -> ProviderRegistry:
     reg = reg if reg is not None else ProviderRegistry()
 
     # ── STT ──
-    from echo_node.components.stt import FasterWhisperSTT, ParakeetSTT
+    from echo_node.components.stt import FasterWhisperSTT, HuggingFaceWhisperSTT, ParakeetSTT
     reg.register(SlotType.STT, "faster-whisper", FasterWhisperSTT)
     reg.register(SlotType.STT, "parakeet", ParakeetSTT)
     # "onnx-asr" is the config.example.yaml name for the same Parakeet backend
     reg.register(SlotType.STT, "onnx-asr", ParakeetSTT,
                  capabilities=ParakeetSTT.capabilities())
+    # transformers Whisper (CPU, no CTranslate2); default for Windows dictation (T011)
+    reg.register(SlotType.STT, "hf-whisper", HuggingFaceWhisperSTT)
 
     # ── TTS ──
     from echo_node.components.tts import (
-        KokoroTTS, DotsTTS, CosyVoice3TTS, EspeakTTS, Qwen3TTS, VoxCPMTTS,
+        KokoroTTS, DotsTTS, CosyVoice3TTS, EspeakTTS, Qwen3TTS, VoxCPMTTS, SapiTTS,
     )
     reg.register(SlotType.TTS, "kokoro", KokoroTTS)
     reg.register(SlotType.TTS, "dots", DotsTTS)
@@ -203,6 +205,8 @@ def register_builtin(reg: ProviderRegistry | None = None) -> ProviderRegistry:
     reg.register(SlotType.TTS, "qwen3-tts", Qwen3TTS, experimental=True)
     reg.register(SlotType.TTS, "voxcpn", VoxCPMTTS, experimental=True)
     reg.register(SlotType.TTS, "espeak-ng", EspeakTTS)
+    # Windows in-box TTS (SAPI5); default for the Windows dialogue loop (T020)
+    reg.register(SlotType.TTS, "sapi", SapiTTS)
 
     # ── VAD / wake word ──
     from echo_node.components.vad import OpenWakeWordVad, SileroVAD

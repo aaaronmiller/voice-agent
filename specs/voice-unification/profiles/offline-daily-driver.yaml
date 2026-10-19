@@ -1,0 +1,37 @@
+format: voice-profile/v1
+name: offline-daily-driver
+version: 1
+description: 'Local pipeline daily driver: on-device wake/VAD, batch STT, offline
+  TTS.'
+stack:
+  wake_word: openwakeword
+  vad: openwakeword
+  stt: faster-whisper
+  tts: kokoro
+  agent_backend: hermes
+  avatar: none
+  audio_io: alsa
+  barge_in: vad_gated
+dialogue:
+  provider: hermes
+  transport: websocket
+params:
+  tts.speed: '1.0'
+  barge_in.enabled: 'true'
+secrets:
+  hermes.api_key: env:HERMES_API_KEY
+hardware_floor:
+  os:
+  - linux
+  ram_gb: 8
+  gpu: optional
+  audio: mic + speakers, 16kHz capture
+covers:
+- SPEC-001
+- SPEC-002
+- SPEC-003
+- SPEC-005
+- SPEC-007
+- SPEC-009
+- SPEC-011
+evidence: []

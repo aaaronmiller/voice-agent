@@ -257,6 +257,19 @@ def main() -> int:
         for err in errors:
             print(f"[config] {err}", file=sys.stderr)
         return 1
+    # T010 security gate (SPEC-009): trigger conflicts, inline secrets,
+    # and unresolvable secret references refuse startup BEFORE any capture
+    # or provider contact. Errors name fields, never secret values.
+    try:
+        from echo_node.config_security import security_gate
+        sec_errors, _resolved = security_gate(config)
+    except Exception as exc:
+        print(f"[error] security gate failed: {exc}", file=sys.stderr)
+        return 1
+    if sec_errors:
+        for err in sec_errors:
+            print(f"[config] {err}", file=sys.stderr)
+        return 1
     try:
         return Assistant(config, config_path=Path(args.config)).run()
     except Exception as exc:

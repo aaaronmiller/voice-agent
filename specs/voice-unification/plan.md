@@ -2,7 +2,7 @@
 date: 2026-10-17
 ver: 1.2.1
 author: system adjudicator
-tags: [strata, plan, voice-unification, system-derived, architecture]
+tags: [spec-prep, plan, voice-unification, system-derived, architecture]
 ---
 
 # Voice unification plan
@@ -100,7 +100,7 @@ later within the same product scope. No cockpit shell is required by the intent.
 
 - Derivation: the specification's EVAL bindings; constitution G3.
 - Keep public criteria and IDs here; private cases and expected results belong
-  outside the repository, conventionally `~/.strata/evals/voice-unification/evals.md`.
+  outside the repository, conventionally `~/.spec-prep/evals/voice-unification/evals.md`.
   The implementer does not inspect private cases; a separate evaluator runs them.
   Verify matching cases exist before reporting evaluation readiness.
 - Cost: maintaining separate cases and results. An external path does not itself

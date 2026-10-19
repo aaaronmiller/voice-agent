@@ -2,7 +2,7 @@
 date: 2026-10-15
 ver: 1.1.0
 author: system adjudication of supplied human intent
-tags: [strata, intent, voice-unification, human-authored, constraints]
+tags: [spec-prep, intent, voice-unification, human-authored, constraints]
 ---
 
 # Voice unification intent

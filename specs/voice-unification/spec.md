@@ -2,7 +2,7 @@
 date: 2026-10-15
 ver: 1.1.0
 author: system adjudicator
-tags: [strata, spec, voice-unification, eval-binding, contract]
+tags: [spec-prep, spec, voice-unification, eval-binding, contract]
 ---
 
 # Voice unification specification

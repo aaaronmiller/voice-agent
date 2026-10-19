@@ -1,7 +1,7 @@
 {
   "artifacts": {
     "constitution": "specs/voice-unification/constitution.md",
-    "evalManifest": "~/.strata/evals/voice-unification/evals.md (outside repository)",
+    "evalManifest": "~/.spec-prep/evals/voice-unification/evals.md (outside repository)",
     "hashes": {
       "specs/voice-unification/constitution.md": "0f91347cfb1c50dff59eea70cc89e367329f5952d44df150c638ef6c31c09f0f",
       "specs/voice-unification/intent.md": "7c5ae7c81a0122395ebe22ddec81a3ff6e2f53efb7f8fe2e91ca26fee25ba5d7",
@@ -26,14 +26,14 @@
   "buildRoot": "/home/cheta/code/voice-agent",
   "gates": {
     "analysis": {
-      "command": "python3 /home/cheta/code/custom-skills/strata/scripts/strata-validate.py specs/voice-unification (from build root)",
-      "evidence": "STRATA validation PASSED: layers separated, clauses evaluable and bound to external evals, spec in contact with context, continuity present, level declared. (57-token self-armed denylist after tasks.md joined the harvest set.)",
+      "command": "python3 /home/cheta/code/custom-skills/spec-prep/scripts/spec-prep-validate.py specs/voice-unification (from build root)",
+      "evidence": "spec-prep validation PASSED: layers separated, clauses evaluable and bound to external evals, spec in contact with context, continuity present, level declared. (57-token self-armed denylist after tasks.md joined the harvest set.)",
       "observedAt": "2026-10-17T01:54Z",
       "status": "passed"
     },
     "constitution": {
       "command": "Read against specs/voice-unification/constitution.md G1-G5 (reviewer: preparation session, not the builder)",
-      "evidence": "G1 quarantine honored (research annex candidate-only; layer-allow.txt justifies 3 names). G2 platform honesty intact (per-target evidence required; Sec 3 of spec). G3 eval separation holds (12 blind cases at ~/.strata/evals/voice-unification/evals.md; evaluator-context isolation NOT established, disclosed). G4 MIT root verified (LICENSE, live lineage). G5 this receipt is the evidence record; tasks.md unchecked pending implementation.",
+      "evidence": "G1 quarantine honored (research annex candidate-only; layer-allow.txt justifies 3 names). G2 platform honesty intact (per-target evidence required; Sec 3 of spec). G3 eval separation holds (12 blind cases at ~/.spec-prep/evals/voice-unification/evals.md; evaluator-context isolation NOT established, disclosed). G4 MIT root verified (LICENSE, live lineage). G5 this receipt is the evidence record; tasks.md unchecked pending implementation.",
       "observedAt": "2026-10-17T01:54Z",
       "status": "passed"
     },
@@ -44,9 +44,15 @@
       "status": "passed"
     },
     "traceability": {
-      "command": "python3 /home/cheta/code/custom-skills/strata/scripts/strata-validate.py specs/voice-unification --trace",
+      "command": "python3 /home/cheta/code/custom-skills/spec-prep/scripts/spec-prep-validate.py specs/voice-unification --trace",
       "evidence": "All 12 clauses carry EVAL tags resolving to the external manifest; every clause cited by plan decisions (SPEC-002/003/005/009/011 citations completed in plan v1.2.1); every clause traces to intent sections. Standing Not-yet-decided items point at T001-T004.",
       "observedAt": "2026-10-17T01:54Z",
+      "status": "passed"
+    },
+    "windowsCapabilities": {
+      "command": "survey archive/stt_project (hotkey_listener.py, paster.py, clipboard_manager.py, README 8/8 report) from Linux host; no Windows execution available in-session",
+      "evidence": "docs/setup-windows.md (2026-10-17): hotkey/Ctrl+V/text-clipboard present-in-principle (archive-reported, unreproduced); rich-format clipboard + elevated-window insert explicit GAPs; WASAPI/device-change/DPAPI-keyring designs frozen with deferred hardware proof. Per-A1-task capability map included.",
+      "observedAt": "2026-10-17T02:30Z",
       "status": "passed"
     }
   },

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "kind": "strata-workbench",
+  "kind": "spec-prep-workbench",
   "intake": "project-intake.json",
   "mode": "auto",
   "additionalFiles": "discover",

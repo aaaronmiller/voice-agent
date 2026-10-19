@@ -1,15 +1,15 @@
 ---
 date: 2026-10-17 01:54 UTC
 ver: 1.0.0
-author: system (strata preparation)
-tags: [strata, continuity, voice-unification, standing]
+author: system (spec-prep preparation)
+tags: [spec-prep, continuity, voice-unification, standing]
 ---
 
 # Standing
 
 ## Where this is
 
-Voice unification is in specification preparation (Strata Phase 4–6) against
+Voice unification is in specification preparation (spec-prep Phase 4–6) against
 the live lineage `aaaronmiller/voice-agent` at d81069e. Intent, spec, plan
 (v1.2.1), constitution, research annex, substrate, eval manifest, and ledger
 exist; `tasks.md`, `preparation.json`, `reset-handoff.md`, and
@@ -25,7 +25,7 @@ green. No implementation has started under this preparation.
 - SEQ 2–3: drift citations completed in plan v1.2.1; `layer-allow.txt`
   justifies voiceink / express / intent.md as user-facing names.
 - SEQ 4–5: substrate S3 declared; twelve blind evals held outside the repo at
-  `~/.strata/evals/voice-unification/evals.md`; evaluator-context isolation
+  `~/.spec-prep/evals/voice-unification/evals.md`; evaluator-context isolation
   NOT established (disclosed).
 - SEQ 6–8: three refinement passes complete — failure-condition coverage
   verified, traceability recorded, live-tree targeting confirmed.
@@ -42,10 +42,11 @@ green. No implementation has started under this preparation.
 
 ## Next
 
-Write `specs/voice-unification/tasks.md` (gated, dependency-ordered, mapped
-to SPEC/EVAL IDs with recovery), then `preparation.json` with real gate
-evidence, then `reset-handoff.md`; re-run the validator to green before any
-fresh-harness initiation.
+T020 fully closed (SEQ 14, 2026-10-17): streaming turn 1.79s WITHIN 2s
+on SPECTRE-16 (fw-tiny + qwen2.5:0.5b pinned-warm + warm-SAPI). New
+`ollama` backend (config-only). GPU verdict: Intel-only box, CPU int8
++ warm persistence is correct — no usable GPU for these providers.
+Next: T021 echo exclusion + barge-in.
 
 ## Substrate note
 

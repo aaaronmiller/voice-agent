@@ -2,7 +2,7 @@
 date: 2026-10-16
 ver: 1.0.0
 author: research synthesis (4 scout agents + direct survey)
-tags: [strata, research, voice-unification, component-survey, 2026-10]
+tags: [spec-prep, research, voice-unification, component-survey, 2026-10]
 ---
 
 # Component survey (Oct 2026) — 50+ primary sources

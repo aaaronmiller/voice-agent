@@ -1,8 +1,8 @@
 ---
 date: 2026-10-17 01:54 UTC
 ver: 1.0.0
-author: system (strata preparation)
-tags: [strata, handoff, voice-unification, reset]
+author: system (spec-prep preparation)
+tags: [spec-prep, handoff, voice-unification, reset]
 ---
 
 # Reset handoff — voice unification
@@ -29,7 +29,7 @@ preparation time (moved from `code/buttplug/voice-agent` 2026-10-17; stale
   `specs/voice-unification/ledger/standing.md`
 - Receipt: `specs/voice-unification/preparation.json` (hashes + gate evidence)
 - Held-out evals (evaluator only, NEVER the builder):
-  `~/.strata/evals/voice-unification/evals.md`
+  `~/.spec-prep/evals/voice-unification/evals.md`
 
 ## Validated inputs
 
@@ -40,10 +40,10 @@ a layer-scoped change request against intent.md, never a retroactive block.
 
 ## Preparation commands run (all green)
 
-- `python3 strata-validate.py specs/voice-unification` → PASSED
-- `python3 strata-validate.py specs/voice-unification --trace` → 12/12
+- `python3 spec-prep-validate.py specs/voice-unification` → PASSED
+- `python3 spec-prep-validate.py specs/voice-unification --trace` → 12/12
   bound, 12/12 cited
-- `python3 strata-validate.py --audit <spec.md> <plan.md>` →
+- `python3 spec-prep-validate.py --audit <spec.md> <plan.md>` →
   source-pack check recorded during preparation (2 advisory notes resolved
   via citations + layer-allow.txt)
 

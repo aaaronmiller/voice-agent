@@ -72,11 +72,24 @@ hotkeys:
   enabled: true
   terminal_enter: true
   escape_toggle: true
+  # Dictation vs dialogue triggers (T010: each action needs its own combo —
+  # two actions on the same combo is a startup refusal, SPEC-009).
+  dictation_hotkey: ctrl+shift+a
+  dialogue_hotkey: ""
+  force_listen_hotkey: ""
+  cancel_hotkey: escape
 
 performance:
   preload_stt: true
   warm_tts: true
   warm_backend: false
+
+# T020 dialogue loop budgets (SPEC-004/005).
+dialogue:
+  # end-of-speech → audible response content, seconds, declared conditions.
+  response_budget_s: 2.0
+  # finite stall budget around the whole backend call, seconds.
+  provider_timeout_s: 30.0
 
 stt:
   provider: onnx-asr

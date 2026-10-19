@@ -529,6 +529,164 @@ class EspeakTTS(TTSProvider):
         return
 
 
+class SapiTTS(TTSProvider):
+    """Windows Speech API TTS via System.Speech (SAPI5, in-box on Win10/11).
+
+    Registered through ``register_builtin`` like the other providers.
+    Proven 2026-10-17 on SPECTRE-16: PowerShell synthesis of a short
+    sentence produces a valid WAV (~100KB). Default TTS for the Windows
+    dialogue loop (T020) — no downloads, no extra installs.
+    """
+    _PS = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+    def __init__(self, config: dict[str, Any]):
+        self.voice = str(config.get("sapi_voice", ""))
+        self.rate = int(config.get("sapi_rate", 0))
+        if os.name != "nt" and not str(config.get("_allow_non_windows", "")):
+            raise RuntimeError("sapi TTS requires Windows")
+        import shutil as _shutil
+        if os.name == "nt" and not Path(self._PS).exists() and _shutil.which("powershell") is None:
+            raise RuntimeError("PowerShell not found for SAPI synthesis")
+
+    def load(self) -> None:
+        # Opportunistic warm start: a persistent PowerShell host removes
+        # the ~0.6s spawn + ~1.2s .NET/SAPI init per sentence. Failure
+        # here is non-fatal — synthesize_to_wav falls back to one-shot.
+        try:
+            self._ensure_server()
+        except Exception:  # noqa: BLE001, S110 — warm start is opportunistic; fallback covers
+            pass
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="sapi",
+            version="SAPI5 in-box",
+            languages=["en"],
+            streaming=False,  # batch: whole sentence per synthesize_to_wav()
+            gpu_required=False,
+            license="unknown",  # OS component, not redistributed
+            network=False,
+            notes="Windows in-box TTS; no downloads",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        import platform as _platform
+        if _platform.system() != "Windows" and not (config or {}).get("_allow_non_windows"):
+            return missing_result("Windows (SAPI)", {"platform": _platform.system()})
+        return ok_result("SAPI available (System.Speech via PowerShell)", {})
+
+    def synthesize_to_wav(self, text: str, path: Path) -> Path:
+        path = Path(path)
+        # Warm path first (persistent host, no spawn/init); any failure
+        # → one-shot fallback below. Never fails the turn on host issues.
+        try:
+            return self._synth_via_server(text, path)
+        except Exception:  # noqa: BLE001, S110 — warm host failure falls through to one-shot below
+            pass
+        # One-shot fallback: spawn PowerShell per sentence (~0.6s spawn
+        # + ~1.2s .NET/SAPI init + synth).
+        # PowerShell single-quoted string: escape only single quotes.
+        safe = str(text).replace("'", "''")
+        voice_sel = ""
+        if self.voice:
+            voice_sel = f"$s.SelectVoice('{self.voice}'); "
+        rate_sel = f"$s.Rate = {self.rate}; " if self.rate else ""
+        script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            f"{voice_sel}{rate_sel}"
+            f"$s.SetOutputToWaveFile('{path}'); $s.Speak('{safe}'); $s.Dispose()"
+        )
+        subprocess.run(
+            [self._PS, "-NoProfile", "-NonInteractive", "-Command", script],
+            check=True, capture_output=True, timeout=120)
+        if not path.exists() or path.stat().st_size < 1000:
+            raise RuntimeError(f"SAPI synthesis produced no audio for {str(path)!r}")
+        return path
+
+    def unload(self) -> None:
+        self._stop_server()
+
+    def warm(self) -> None:
+        try:
+            self._ensure_server()
+        except Exception:  # noqa: BLE001, S110 — warm start is opportunistic; fallback covers
+            pass
+
+    # ── Persistent PowerShell host (warm path) ───────────────────
+    # One powershell child, scripts over stdin, DONE/FAIL sentinel on
+    # stdout. Owned by this instance; stopped on unload(). Any failure
+    # → one-shot fallback, never a turn failure.
+
+    def _ensure_server(self) -> None:
+        proc = getattr(self, "_ps_proc", None)
+        if proc is not None and proc.poll() is None:
+            return
+        import threading as _threading
+        bootstrap = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "Write-Output '__SAPI_READY__'; "
+            "$line = [Console]::In.ReadLine(); "
+            "while ($line -ne $null) { "
+            "try { "
+            "$p = $line.IndexOf('|'); "
+            "$f = $line.Substring(0, $p); $t = $line.Substring($p + 1); "
+            "$s.SetOutputToWaveFile($f); $s.Speak($t); "
+            "Write-Output '__SAPI_DONE__'; "
+            "} catch { Write-Output '__SAPI_FAIL__'; } "
+            "$line = [Console]::In.ReadLine(); } "
+        )
+        proc = subprocess.Popen(
+            [self._PS, "-NoProfile", "-NonInteractive", "-Command", bootstrap],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        self._ps_proc = proc
+        self._ps_lock = _threading.Lock()
+        # Wait for readiness (covers spawn + .NET/SAPI init once).
+        line = proc.stdout.readline() if proc.stdout is not None else ""
+        if "__SAPI_READY__" not in str(line):
+            raise RuntimeError("SAPI host did not become ready")
+
+    def _stop_server(self) -> None:
+        proc = getattr(self, "_ps_proc", None)
+        self._ps_proc = None
+        if proc is None:
+            return
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except Exception:  # noqa: BLE001, S110 — best-effort stdin close at shutdown
+            pass
+        try:
+            proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001 — hung host is killed below, never blocks unload
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001, S110 — kill is last resort; nothing left to do
+                pass
+
+    def _synth_via_server(self, text: str, path: Path) -> Path:
+        self._ensure_server()
+        proc = self._ps_proc
+        assert proc is not None and proc.stdin is not None and proc.stdout is not None
+        # Newlines would split the protocol line; pipes would split the
+        # fields. Both degrade to spaces (dictation/dialogue text rarely
+        # needs them; the one-shot fallback has no such restriction).
+        safe = str(text).replace("|", " ").replace("\r", " ").replace("\n", " ")
+        with self._ps_lock:
+            proc.stdin.write(f"{path}|{safe}\n")
+            proc.stdin.flush()
+            line = proc.stdout.readline()
+        if "__SAPI_DONE__" not in str(line):
+            raise RuntimeError(f"SAPI host synth failed: {str(line).strip()[:120]}")
+        if not path.exists() or path.stat().st_size < 1000:
+            raise RuntimeError(f"SAPI host produced no audio for {str(path)!r}")
+        return path
+
+
 # ── Registry-backed factory (historical fallback behavior preserved) ──
 
 def create_tts(tts_config: dict[str, Any]) -> TTSProvider:

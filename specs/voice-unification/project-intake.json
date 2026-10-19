@@ -3,7 +3,7 @@
   "externalResources": [
     {
       "handling": "evaluator-private; builder MUST NOT read",
-      "path": "~/.strata/evals/voice-unification/evals.md",
+      "path": "~/.spec-prep/evals/voice-unification/evals.md",
       "role": "held-out-eval-manifest"
     }
   ],

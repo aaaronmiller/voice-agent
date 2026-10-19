@@ -2,23 +2,23 @@
 date: 2026-08-29
 ver: 1.0.0
 author: OpenAI GPT-5.6 Sol
-tags: [strata, requirements, realtime-voice, desktop, android, openai, gemini, qwen, xai]
+tags: [spec-prep, requirements, realtime-voice, desktop, android, openai, gemini, qwen, xai]
 status: design-baseline
 project: realtime-voice-cockpit
 ---
 
 # Realtime Voice Cockpit — Requirements
 
-## 0. Document role and STRATA mapping
+## 0. Document role and spec-prep mapping
 
 This document is the human-facing **what / why / contract** layer for Realtime Voice Cockpit (RVC). It intentionally does not prescribe implementation technology except where a platform or provider boundary is itself a requirement.
 
-The requested delivery surface is two files rather than a full STRATA tree. To preserve STRATA-style traceability without inventing extra files:
+The requested delivery surface is two files rather than a full spec-prep tree. To preserve spec-prep-style traceability without inventing extra files:
 
 - `REQ-*` identifies a product requirement.
 - `EVAL-*` is the one-to-one acceptance binding for that requirement.
 - `design.md` derives implementation decisions from these requirements and references the same IDs.
-- A later promotion into a full STRATA corpus may split human intent, formal specification, context, evaluations, standing, plays, and ledger without renumbering these requirements.
+- A later promotion into a full spec-prep corpus may split human intent, formal specification, context, evaluations, standing, plays, and ledger without renumbering these requirements.
 - “Included” means required by this design baseline, not already implemented.
 - “Future” means intentionally excluded from the first production milestone but retained as continuity.
 - “Rejected” means deliberately not part of the architecture.

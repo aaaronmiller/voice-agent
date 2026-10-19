@@ -146,6 +146,88 @@ class ParakeetSTT(STTProvider):
         return str(text).strip()
 
 
+class HuggingFaceWhisperSTT(STTProvider):
+    """STT via HuggingFace transformers Whisper (CPU, no CTranslate2 needed).
+
+    Registered through the same ``register_builtin`` path as the other
+    providers. Proven 2026-10-17 on SPECTRE-16 (Windows 11, torch CPU):
+    whisper-tiny loads in ~3s, transcribes 3s audio in ~1.6s. Default
+    transcriber for the Windows dictation path (T011).
+    """
+    def __init__(self, config: dict[str, Any]):
+        self.model_id = str(config.get("model_id", "openai/whisper-tiny"))
+        self.language = str(config.get("language", "en"))
+        self._processor = None
+        self._model = None
+
+    @classmethod
+    def capabilities(cls) -> Capability:
+        return Capability(
+            name="hf-whisper",
+            version="whisper-tiny",
+            languages=["en"],
+            streaming=False,  # batch: whole WAV per transcribe() call
+            vram_gb=None,
+            gpu_required=False,  # torch CPU
+            license="MIT",
+            network=True,  # HF download on first load
+            notes="transformers Whisper tiny; CPU transcription",
+        )
+
+    @classmethod
+    def validate(cls, config: dict[str, Any] | None = None) -> ValidationResult:
+        found, ver = check_module("transformers")
+        if found:
+            return ok_result(f"transformers {ver} importable", {"version": ver})
+        return missing_result("transformers", {"module": "transformers"})
+
+    def load(self) -> None:
+        if self._model is not None:
+            return
+        import torch
+        from transformers import WhisperForConditionalGeneration, WhisperProcessor
+        started = time.perf_counter()
+        print(f"[stt] loading {self.model_id} (torch CPU)", flush=True)
+        self._processor = WhisperProcessor.from_pretrained(self.model_id)
+        self._model = WhisperForConditionalGeneration.from_pretrained(self.model_id)
+        self._model = self._model.to(torch.device("cpu"))
+        self._model.eval()
+        print(f"[timing] stt_load={time.perf_counter() - started:.2f}s", flush=True)
+
+    def unload(self) -> None:
+        if self._model is None:
+            return
+        del self._model
+        del self._processor
+        self._model = None
+        self._processor = None
+        import gc; gc.collect()
+
+    def transcribe(self, wav_path: Path) -> str:
+        self.load()
+        assert self._model is not None and self._processor is not None
+        started = time.perf_counter()
+        try:
+            import soundfile as sf
+            audio, sr = sf.read(str(wav_path), dtype="float32")
+            if sr != 16000:
+                import numpy as np
+                ratio = 16000 / float(sr)
+                idx = (np.arange(int(len(audio) * ratio)) / ratio).astype(int)
+                audio = np.asarray(audio)[idx.clip(0, len(audio) - 1)]
+        except ImportError:
+            import wave as _wave
+            import numpy as _np
+            with _wave.open(str(wav_path), "rb") as wf:
+                raw = wf.readframes(wf.getnframes())
+            audio = _np.frombuffer(raw, dtype=_np.int16).astype(_np.float32) / 32768.0
+        inputs = self._processor(audio, sampling_rate=16000, return_tensors="pt").input_features
+        ids = self._model.generate(inputs, max_new_tokens=128, language=self.language)
+        text = self._processor.batch_decode(ids, skip_special_tokens=True)[0]
+        print(f"[timing] stt={time.perf_counter() - started:.2f}s", flush=True)
+        return str(text).strip()
+
+
 # ── Registry-backed factory (historical fallback behavior preserved) ──
 
 def create_stt(stt_config: dict[str, Any]) -> STTProvider:

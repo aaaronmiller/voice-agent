@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from echo_node.backends import AgentBackend, REGISTRY, create_backend
+from echo_node.capture_guard import CaptureGuard
 from echo_node.components.audio import (
     AudioConfig, InterruptibleSpeaker, MicStream, create_audio_io,
 )
@@ -28,6 +29,15 @@ from echo_node.pipeline.integrations import HermesIntegration, PiIntegration
 from echo_node.pipeline.router import LLMRouter
 from echo_node.slots import SlotType
 from echo_node.slots.registry import get_registry
+
+
+# ── T020 backend stall signal ───────────────────────────────────────
+
+class _BackendStall(Exception):
+    """Backend failed or stalled. ``kind`` is sanitized (no internals)."""
+    def __init__(self, kind: str):
+        super().__init__(kind)
+        self.kind = kind
 
 
 # ── Assistant (orchestrator) ────────────────────────────────────────
@@ -151,6 +161,18 @@ class Assistant:
 
         # Post-turn cooldown: wait before re-enabling wake word detection
         self._post_turn_cooldown = float(config.get("performance", {}).get("post_turn_cooldown_seconds", 3))
+
+        # T020 dialogue state: one-action arming. Armed idle = ready without
+        # re-arming; disarm stops capture/playback and pending work cannot
+        # restart them. Shared CaptureGuard with dictation (T012).
+        self.guard = CaptureGuard()
+        self.armed = False
+        # SPEC-004 response budget: end-of-speech → audible content ≤ 2s
+        # under declared conditions; SPEC-005 stall budget for providers.
+        dialogue_cfg = config.get("dialogue", {})
+        self.response_budget_s = float(dialogue_cfg.get("response_budget_s", 2.0))
+        self.provider_timeout_s = float(dialogue_cfg.get("provider_timeout_s", 30.0))
+        self._level_last_print = 0.0
 
         # Verbose toggle state (user can say "be verbose" to override)
         self._verbose_override = False
@@ -429,13 +451,67 @@ class Assistant:
         self._external_result(
             True, f"removed {slot.value}/{name} from {self.config_path.name}", name)
 
+    # ── T020 arming (SPEC-001) ─────────────────────────────────────
+
+    def arm(self) -> bool:
+        """One action arms the loop: guard check → mic → prewarm → ready.
+
+        Local wake/VAD/level indication work offline (no provider contact
+        here). Returns True when armed; False leaves everything disarmed.
+        """
+        status = self.guard.re_arm()
+        if not status.allowed:
+            print(f"[arm] refused ({status.reason}): {status.guidance}", flush=True)
+            self.armed = False
+            return False
+        try:
+            self.mic.open()
+        except Exception as exc:  # noqa: BLE001 — any mic-open failure becomes a guarded refusal
+            saved = self.guard.report_runtime_loss(exc)
+            print(f"[arm] mic failed: {saved.guidance}", flush=True)
+            self.armed = False
+            return False
+        self.hotkey.start()
+        self._prewarm()
+        self.armed = True
+        # Readiness indication: armed state + offline controls verified.
+        print("[ready] armed — say the wake phrase or press Enter/Escape "
+              "(wake/VAD/level run locally, no network needed)", flush=True)
+        self._send_state("idle")
+        return True
+
+    def disarm(self) -> None:
+        """Stop capture/playback; pending work cannot restart them."""
+        self.armed = False
+        self.guard.disarm()
+        self.stop = True
+        try:
+            self.mic.close()
+        except Exception:
+            pass
+        self._send_state("idle")
+        print("[disarmed] capture stopped — re-arm explicitly", flush=True)
+
+    def _level_meter(self, samples: Any) -> None:
+        """Throttled input-level indication (SPEC-001 offline control)."""
+        now = time.monotonic()
+        if now - self._level_last_print < 0.5:
+            return
+        self._level_last_print = now
+        try:
+            import numpy as _np
+            rms = float(_np.sqrt(_np.mean(
+                _np.asarray(samples).astype(_np.float32) ** 2)))
+        except Exception:  # noqa: BLE001 — meter must never break the loop
+            return
+        bars = min(20, int(rms / 500))
+        print(f"[level] {'#' * bars:<20} rms={rms:.0f}", flush=True)
+
     def run(self) -> int:
         signal.signal(signal.SIGINT, self._stop)
         signal.signal(signal.SIGTERM, self._stop)
-        self.mic.open()
-        self.hotkey.start()
-        self._prewarm()
-        print("[ready] say the wake phrase or press Enter/Escape", flush=True)
+        if not self.arm():
+            return 1
         try:
             while not self.stop:
                 # Idle model unloading: if no activity for N seconds, free memory
@@ -466,7 +542,14 @@ class Assistant:
                     continue
 
                 # Normal wake word flow
-                samples = self.mic.read()
+                try:
+                    samples = self.mic.read()
+                except Exception as exc:  # noqa: BLE001 — any mic failure is runtime loss via guard
+                    saved = self.guard.report_runtime_loss(exc)
+                    print(f"[capture] {saved.guidance}", flush=True)
+                    self.armed = False
+                    return 1
+                self._level_meter(samples)
                 detected, name, score = self.wake.detect(samples)
                 if not detected:
                     continue
@@ -549,9 +632,16 @@ class Assistant:
 
         self._send_state("listening")
         rec.t_listen_start = time.perf_counter()
-        wav_path = self.recorder.record_turn()
+        # T012: capture gate — denial returns None before any mic read.
+        wav_path = self.recorder.record_turn(guard=self.guard)
         rec.t_listen_done = time.perf_counter()
         if wav_path is None:
+            # Distinguish guard refusal (already messaged) from silence.
+            if self.guard.disabled_reason is not None:
+                rec.error = f"capture_disabled:{self.guard.disabled_reason}"
+                self.logger.end_turn(rec)
+                self.armed = False
+                return
             rec.error = "no_speech"
             self.logger.end_turn(rec)
             self.speaker.speak("I did not hear speech.", None, turn_rec=rec)
@@ -629,18 +719,14 @@ class Assistant:
                         rec.t_llm_first_token = time.perf_counter()
                     if token:
                         yield token
+            # SPEC-005: finite stall budget around the whole backend call.
+            # Failure surfaces a sanitized reason and returns to armed idle.
             try:
-                stream = backend.chat_stream(text, system_prompt)
-                interrupted, full_text = self.speaker.speak_stream(
-                    _token_to_text(stream), self.mic, turn_rec=rec)
-                answer = full_text
-                rec.interrupted = interrupted
-            except Exception as exc:
-                print(f"[backend] stream failed: {exc}, falling back", flush=True)
-                answer = backend.chat(text, system_prompt)
-                answer = self._format_reply(answer)
-                interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
-                rec.interrupted = interrupted
+                answer = self._backend_with_timeout(
+                    backend, text, system_prompt, rec, _token_to_text)
+            except _BackendStall as stall:
+                self._backend_failure(rec, stall.kind)
+                return
         else:
             # Fallback: SmartRouter → Hermes / LLMRouter
             route_key = self.router.classify(text)
@@ -673,9 +759,85 @@ class Assistant:
         rec.assistant_text = answer
         truncated = answer[:200] + ("…" if len(answer) > 200 else "")
         print(f"[assistant/{rec.llm_model}] {truncated}", flush=True)
+        # SPEC-004 verdict: end-of-speech → audible content budget.
+        rec.derive_latencies()
+        self._budget_verdict(rec)
         self.logger.end_turn(rec)
         if rec.interrupted:
             self._handle_turn(rec)
+
+    # ── T020 provider stall budget (SPEC-004/005) ────────────────────
+
+    def _budget_verdict(self, rec: TurnRecord) -> None:
+        """SPEC-004: log whether end-of-speech→audible-content met budget."""
+        e2m = rec.latency_ears_to_mouth
+        if not e2m:
+            return  # playback timestamp missing — verdict impossible, not a pass
+        verdict = "WITHIN" if e2m <= self.response_budget_s else "OVER"
+        print(f"[budget] ears→mouth={e2m:.2f}s {verdict} "
+              f"(budget {self.response_budget_s:.1f}s)", flush=True)
+
+    def _backend_with_timeout(self, backend: AgentBackend, text: str,
+                              system_prompt: str, rec: TurnRecord,
+                              token_to_text: Any) -> str:
+        """Run backend→speech within the stall budget.
+
+        Streams first (barge-in capable path); on stream failure falls
+        back to blocking chat. Raises _BackendStall with a sanitized
+        kind on failure/timeout — never leaks internals.
+        """
+        import concurrent.futures as _fut
+
+        def _streaming() -> tuple[bool, str]:
+            stream = backend.chat_stream(text, system_prompt)
+            return self.speaker.speak_stream(
+                token_to_text(stream), self.mic, turn_rec=rec)
+
+        with _fut.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_streaming)
+            try:
+                interrupted, full_text = future.result(
+                    timeout=self.provider_timeout_s)
+            except _fut.TimeoutError:
+                future.cancel()
+                raise _BackendStall("stalled") from None
+            except Exception:  # noqa: BLE001 — any stream failure falls back to blocking chat inside budget
+                # Streaming path failed — one blocking retry inside budget.
+                try:
+                    future2 = pool.submit(backend.chat, text, system_prompt)
+                    answer = future2.result(timeout=self.provider_timeout_s)
+                except _fut.TimeoutError:
+                    raise _BackendStall("stalled") from None
+                except Exception:  # noqa: BLE001 — backend internals become sanitized _BackendStall
+                    raise _BackendStall("failed") from None
+                answer = self._format_reply(answer)
+                interrupted = self.speaker.speak(answer, self.mic, turn_rec=rec)
+                full_text = answer
+        rec.interrupted = interrupted
+        return full_text
+
+    def _backend_failure(self, rec: TurnRecord, kind: str) -> None:
+        """SPEC-005: sanitized reason, spoken + logged, back to armed idle.
+
+        Eligible armed dialogue returns to armed idle WITHOUT re-arming;
+        disarm/unavailable prerequisites keep it disabled. Late results
+        cannot restart output (single-threaded turn — nothing pending).
+        """
+        rec.error = f"backend_{kind}"
+        self.logger.end_turn(rec)
+        reason_spoken = ("The assistant took too long. Back to listening."
+                         if kind == "stalled"
+                         else "The assistant is unavailable. Back to listening.")
+        print(f"[backend] {kind} — returning to armed idle", flush=True)
+        try:
+            self.speaker.speak(reason_spoken, None, turn_rec=rec)
+        except Exception:  # noqa: BLE001, S110 — failure announcement is best-effort; turn already logged
+            pass
+        self._send_state("idle")
+        # armed stays True when previously armed and usable (guard healthy);
+        # disarm or guard-disabled keeps it off.
+        if self.guard.disarmed_by_user or self.guard.disabled_reason is not None:
+            self.armed = False
 
     def _handle_hermes_direct(self, query: str, rec: TurnRecord | None = None) -> None:
         """Direct Hermes invocation with guaranteed tool access."""

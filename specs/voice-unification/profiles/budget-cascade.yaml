@@ -1,0 +1,35 @@
+format: voice-profile/v1
+name: budget-cascade
+version: 1
+description: 'Cheapest workable cascade: batch STT, fast TTS fallback chain, local
+  backend.'
+stack:
+  wake_word: openwakeword
+  vad: openwakeword
+  stt: onnx-asr
+  tts: kokoro
+  agent_backend: hermes
+  avatar: none
+  audio_io: alsa
+  barge_in: vad_gated
+dialogue:
+  provider: hermes
+  transport: websocket
+params:
+  tts.speed: '1.6'
+  barge_in.enabled: 'false'
+secrets:
+  hermes.api_key: env:HERMES_API_KEY
+hardware_floor:
+  os:
+  - linux
+  ram_gb: 4
+  gpu: none-required
+  audio: mic + speakers, 16kHz capture
+covers:
+- SPEC-001
+- SPEC-005
+- SPEC-007
+- SPEC-009
+- SPEC-011
+evidence: []

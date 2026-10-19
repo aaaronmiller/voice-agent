@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-17, voice-unification ledger SEQ 10):** historical reference, read-only. Do not check or extend. Authoritative forward task list: `specs/voice-unification/tasks.md` (T001–T061, SPEC-mapped, gated). Reason: ID-namespace collision, stale completion claims vs live gate (25/28), no SPEC/EVAL bindings.
+
 # Tasks: Echo-Node Voice AI Interface
 
 **Input**: Design documents from `/specs/001-echo-node-core/`
